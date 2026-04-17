@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { isToolCallEventType } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
+import { Type } from "@sinclair/typebox";
 
 // ─── Types ────────────────────────────────────────────────────────────
 
@@ -22,6 +23,7 @@ interface HarnessState {
   currentIncrement?: string;
   regressionCount: number;
   debateRound?: number;
+  commitCount: number;
 }
 
 // ─── Mutating tools blocked in explore mode ───────────────────────────
@@ -74,6 +76,7 @@ export default function (pi: ExtensionAPI) {
     mode: "off",
     acStatuses: [],
     regressionCount: 0,
+    commitCount: 0,
   };
 
   // ── State persistence ─────────────────────────────────────────────
@@ -83,7 +86,7 @@ export default function (pi: ExtensionAPI) {
   }
 
   pi.on("session_start", async (_event, ctx) => {
-    state = { mode: "off", acStatuses: [], regressionCount: 0 };
+    state = { mode: "off", acStatuses: [], regressionCount: 0, commitCount: 0 };
     for (const entry of ctx.sessionManager.getEntries()) {
       if (entry.type === "custom" && entry.customType === "cognitive-harness-state") {
         state = entry.data as HarnessState;
@@ -115,6 +118,7 @@ export default function (pi: ExtensionAPI) {
       state.mode = "execute";
       state.currentIncrement = undefined;
       state.regressionCount = 0;
+      state.commitCount = 0;
       saveState();
       updateUI(ctx);
       ctx.ui.notify("⚙️ Execute mode activated — full tool access, AC tracking enabled", "info");
@@ -218,8 +222,9 @@ You are operating in convergent execution mode with 3-role mutual verification.
 - 🔨 IMP (Implementer): Writes code. Cannot mark ACs passed.
 - ✅ VER (Verifier): Sole authority on AC pass/fail. Cannot write code.
 Iron law: No role evaluates its own output.
-AC Status: ${passed}/${total} passed. Regressions: ${state.regressionCount}.
+AC Status: ${passed}/${total} passed. Regressions: ${state.regressionCount}. Commits: ${state.commitCount}.
 ${state.currentIncrement ? `Current increment: ${state.currentIncrement}` : ""}
+After VER confirms all gates pass and no regressions for an increment, VER MUST call the harness_commit tool to commit and push the changes before proceeding to the next increment.
 `;
     }
 
@@ -254,13 +259,13 @@ ${state.currentIncrement ? `Current increment: ${state.currentIncrement}` : ""}
 
       ctx.ui.setStatus(
         "harness",
-        `⚙️ EXECUTE ✅${passed} ❌${failed} ⏳${pending}`,
+        `⚙️ EXECUTE ✅${passed} ❌${failed} ⏳${pending} 📦${state.commitCount}`,
       );
 
       const lines = [
         "⚙️ Execute Mode — 3-Role Verification",
-        `📋 PLN → 🔨 IMP → ✅ VER`,
-        `ACs: ✅ ${passed} | ❌ ${failed} | ⏳ ${pending} | Regressions: ${state.regressionCount}`,
+        `📋 PLN → 🔨 IMP → ✅ VER → 📦 Commit`,
+        `ACs: ✅ ${passed} | ❌ ${failed} | ⏳ ${pending} | Regressions: ${state.regressionCount} | Commits: ${state.commitCount}`,
       ];
       if (state.currentIncrement) {
         lines.push(`Current: ${state.currentIncrement}`);
@@ -279,6 +284,95 @@ ${state.currentIncrement ? `Current increment: ${state.currentIncrement}` : ""}
   // Note: TypeBox import would be needed for full implementation.
   // This is the conceptual shape — actual registration requires
   // the @sinclair/typebox Type.Object schema.
+
+  // ── Commit & push tool (VER calls after verification) ─────────────
+
+  pi.registerTool({
+    name: "harness_commit",
+    label: "Commit & Push Increment",
+    description: "Commit verified increment changes and push to remote. Only VER should call this after all gates pass and no regressions are detected.",
+    promptSnippet: "Commit and push verified increment changes (execute mode, VER role only)",
+    promptGuidelines: [
+      "Only call harness_commit in execute mode after VER confirms all gates pass and no regressions.",
+      "Include the increment ID (e.g. INC-1) and a brief description of the changes.",
+    ],
+    parameters: Type.Object({
+      increment: Type.String({ description: "Increment ID, e.g. 'INC-1'" }),
+      message: Type.String({ description: "Brief description of changes in this increment" }),
+    }),
+    async execute(_toolCallId, params, signal, onUpdate, ctx) {
+      if (state.mode !== "execute") {
+        throw new Error("harness_commit is only available in execute mode. Use /execute first.");
+      }
+
+      onUpdate?.({
+        content: [{ type: "text", text: `Staging changes for ${params.increment}...` }],
+      });
+
+      // Stage all changes
+      const addResult = await pi.exec("git", ["add", "-A"], { signal, timeout: 10_000 });
+      if (addResult.code !== 0) {
+        throw new Error(`git add failed: ${addResult.stderr}`);
+      }
+
+      // Check if there are staged changes
+      const diffResult = await pi.exec("git", ["diff", "--cached", "--quiet"], { signal, timeout: 10_000 });
+      if (diffResult.code === 0) {
+        return {
+          content: [{ type: "text", text: `No changes to commit for ${params.increment}.` }],
+          details: { increment: params.increment, skipped: true },
+        };
+      }
+
+      // Commit
+      const commitMsg = `${params.increment}: ${params.message}`;
+      onUpdate?.({
+        content: [{ type: "text", text: `Committing: ${commitMsg}` }],
+      });
+
+      const commitResult = await pi.exec("git", ["commit", "-m", commitMsg], { signal, timeout: 15_000 });
+      if (commitResult.code !== 0) {
+        throw new Error(`git commit failed: ${commitResult.stderr}`);
+      }
+
+      // Get commit hash
+      const hashResult = await pi.exec("git", ["rev-parse", "--short", "HEAD"], { signal, timeout: 5_000 });
+      const hash = hashResult.stdout.trim();
+
+      // Push
+      onUpdate?.({
+        content: [{ type: "text", text: `Pushing ${hash}...` }],
+      });
+
+      const pushResult = await pi.exec("git", ["push"], { signal, timeout: 30_000 });
+      const pushed = pushResult.code === 0;
+
+      // Update state
+      state.commitCount++;
+      state.currentIncrement = params.increment;
+      saveState();
+      updateUI(ctx);
+
+      const pushStatus = pushed
+        ? "pushed to remote"
+        : `push failed: ${pushResult.stderr.trim()}`;
+      const icon = pushed ? "✅" : "⚠️";
+      const summary = `${icon} ${params.increment} committed (${hash}) — ${pushStatus}`;
+
+      ctx.ui.notify(summary, pushed ? "success" : "warning");
+
+      return {
+        content: [{ type: "text", text: summary }],
+        details: {
+          increment: params.increment,
+          hash,
+          message: commitMsg,
+          pushed,
+          pushError: pushed ? undefined : pushResult.stderr.trim(),
+        },
+      };
+    },
+  });
 
   /*
   pi.registerTool({

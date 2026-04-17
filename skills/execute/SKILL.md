@@ -189,6 +189,34 @@ On regression:
 4. VER re-verifies everything
 5. **No increment advances past a known regression.**
 
+#### 2f. Commit & push verified increment (VER triggers)
+
+After ALL gates pass AND regression scan is clean, VER commits the increment:
+
+```markdown
+✅ VER: Committing INC-[N]
+  Commit message: "INC-[N]: [brief description of changes]"
+  Push: [success / fail — reason]
+```
+
+**If running inside pi with the harness extension**, VER calls the `harness_commit` tool:
+```
+harness_commit({ increment: "INC-1", message: "Add user model and migration" })
+```
+
+**If running without the extension** (Claude Code, etc.), VER runs git commands directly:
+```bash
+git add -A
+git commit -m "INC-[N]: [description]"
+git push
+```
+
+**Iron rules:**
+- Never commit with failing gates or known regressions.
+- Never commit before VER's regression scan completes.
+- If push fails, VER reports the error. PLN decides how to proceed (retry, rebase, etc.).
+- Commit messages always start with the increment ID for traceability.
+
 ### Phase 3 — Completion Report (PLN writes, VER audits)
 
 Write to `target/execute/<name>-<YYYYMMDD-HHMMSS>.md`:
