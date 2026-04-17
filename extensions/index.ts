@@ -2,6 +2,8 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 import { isToolCallEventType } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
+import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { join } from "node:path";
 
 // ─── Types ────────────────────────────────────────────────────────────
 
@@ -24,6 +26,45 @@ interface HarnessState {
   regressionCount: number;
   debateRound?: number;
   commitCount: number;
+}
+
+// ─── Verification Registry ───────────────────────────────────────────────
+
+interface VerificationEntry {
+  requirement: string;
+  source?: string;
+  verification: {
+    strategy: string;
+    command?: string;
+    files?: string[];
+    description: string;
+  };
+  registeredAt: string;
+  lastVerifiedAt?: string;
+  lastResult?: "pass" | "fail";
+}
+
+interface VerificationRegistry {
+  $schema: string;
+  entries: Record<string, VerificationEntry>;
+}
+
+const REGISTRY_DIR = ".harness";
+const REGISTRY_FILE = "verification-registry.json";
+
+async function readRegistry(cwd: string): Promise<VerificationRegistry> {
+  try {
+    const content = await readFile(join(cwd, REGISTRY_DIR, REGISTRY_FILE), "utf-8");
+    return JSON.parse(content);
+  } catch {
+    return { $schema: "harness-verification-registry-v1", entries: {} };
+  }
+}
+
+async function writeRegistry(cwd: string, registry: VerificationRegistry): Promise<void> {
+  const dir = join(cwd, REGISTRY_DIR);
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, REGISTRY_FILE), JSON.stringify(registry, null, 2) + "\n", "utf-8");
 }
 
 // ─── Mutating tools blocked in explore mode ───────────────────────────
@@ -224,6 +265,10 @@ You are operating in convergent execution mode with 3-role mutual verification.
 Iron law: No role evaluates its own output.
 AC Status: ${passed}/${total} passed. Regressions: ${state.regressionCount}. Commits: ${state.commitCount}.
 ${state.currentIncrement ? `Current increment: ${state.currentIncrement}` : ""}
+VERIFICATION REGISTRY: VER must maintain a cumulative Verification Registry (.harness/verification-registry.json).
+- After confirming an AC passes, VER MUST call harness_verify_register to record the verification method.
+- Before regression checks, VER MUST call harness_verify_list and re-run every registered verification.
+- A passing AC without a registered verification is a gap that PLN should challenge.
 After VER confirms all gates pass and no regressions for an increment, VER MUST call the harness_commit tool to commit and push the changes before proceeding to the next increment.
 `;
     }
@@ -279,11 +324,129 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
     }
   }
 
-  // ── AC tracking tool (LLM-callable) ───────────────────────────────
+  // ── Verification Registry tools ───────────────────────────────────
 
-  // Note: TypeBox import would be needed for full implementation.
-  // This is the conceptual shape — actual registration requires
-  // the @sinclair/typebox Type.Object schema.
+  pi.registerTool({
+    name: "harness_verify_register",
+    label: "Register Verification Method",
+    description: "Register or update a verification method for an acceptance criterion. VER calls this after confirming an AC passes, recording HOW it was verified so future regression checks can re-run the same verification.",
+    promptSnippet: "Register a reproducible verification method for an AC (execute mode, VER role only)",
+    promptGuidelines: [
+      "Call harness_verify_register after marking an AC as passed to record the verification method.",
+      "Include the exact command to re-run the verification and any test files involved.",
+      "Prefer automated, reproducible strategies (automated-test, type-check, build-output) over manual-check.",
+    ],
+    parameters: Type.Object({
+      ac_id: Type.String({ description: "AC identifier, e.g. 'AC-1.1'" }),
+      requirement: Type.String({ description: "What this AC requires (human-readable)" }),
+      source: Type.Optional(Type.String({ description: "Source criteria document, e.g. 'iteration-4-criteria.md'" })),
+      strategy: Type.String({ description: "Verification strategy: 'automated-test', 'type-check', 'build-output', 'lint-rule', 'manual-check', etc." }),
+      command: Type.Optional(Type.String({ description: "Exact command to re-run this verification, e.g. 'npm test -- --grep login'" })),
+      files: Type.Optional(Type.Array(Type.String(), { description: "Test or verification files involved" })),
+      description: Type.String({ description: "Human-readable explanation of what's being checked and how" }),
+      increment: Type.Optional(Type.String({ description: "Current increment, e.g. 'INC-1'" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      if (state.mode !== "execute") {
+        throw new Error("harness_verify_register is only available in execute mode.");
+      }
+
+      const registry = await readRegistry(ctx.cwd);
+
+      const isUpdate = params.ac_id in registry.entries;
+      registry.entries[params.ac_id] = {
+        requirement: params.requirement,
+        source: params.source,
+        verification: {
+          strategy: params.strategy,
+          command: params.command,
+          files: params.files,
+          description: params.description,
+        },
+        registeredAt: isUpdate
+          ? registry.entries[params.ac_id].registeredAt
+          : (params.increment ?? state.currentIncrement ?? "unknown"),
+        lastVerifiedAt: params.increment ?? state.currentIncrement,
+        lastResult: "pass",
+      };
+
+      await writeRegistry(ctx.cwd, registry);
+
+      const count = Object.keys(registry.entries).length;
+      const verb = isUpdate ? "Updated" : "Registered";
+      const summary = `${verb} verification for ${params.ac_id} (${params.strategy}). Registry: ${count} entries total.`;
+
+      return {
+        content: [{ type: "text", text: summary }],
+        details: { ac_id: params.ac_id, isUpdate, totalEntries: count },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "harness_verify_list",
+    label: "List Verification Registry",
+    description: "List all registered verification methods from the project's Verification Registry. VER calls this before regression checks to get every verification that must be re-run.",
+    promptSnippet: "List all registered verification methods for regression checks (execute mode)",
+    promptGuidelines: [
+      "Call harness_verify_list before running regression checks to get all registered verification methods.",
+      "Re-run every listed verification command during regression scans.",
+    ],
+    parameters: Type.Object({
+      filter: Type.Optional(Type.String({ description: "Filter entries by AC ID prefix, e.g. 'AC-1'" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      if (state.mode !== "execute") {
+        throw new Error("harness_verify_list is only available in execute mode.");
+      }
+
+      const registry = await readRegistry(ctx.cwd);
+      let entries = Object.entries(registry.entries);
+
+      if (params.filter) {
+        entries = entries.filter(([id]) => id.startsWith(params.filter!));
+      }
+
+      if (entries.length === 0) {
+        const total = Object.keys(registry.entries).length;
+        return {
+          content: [{ type: "text", text: params.filter
+            ? `No entries matching '${params.filter}'. Registry has ${total} total entries.`
+            : "Verification Registry is empty. Register verifications after confirming ACs pass." }],
+          details: { entries: [], totalEntries: total },
+        };
+      }
+
+      const lines: string[] = [];
+      lines.push(`Verification Registry: ${entries.length} entries${params.filter ? ` (filtered: '${params.filter}')` : ""}`);
+      lines.push("");
+
+      for (const [id, entry] of entries) {
+        lines.push(`## ${id}: ${entry.requirement}`);
+        lines.push(`  Strategy: ${entry.verification.strategy}`);
+        if (entry.verification.command) {
+          lines.push(`  Command: ${entry.verification.command}`);
+        }
+        if (entry.verification.files?.length) {
+          lines.push(`  Files: ${entry.verification.files.join(", ")}`);
+        }
+        lines.push(`  Description: ${entry.verification.description}`);
+        lines.push(`  Registered: ${entry.registeredAt} | Last verified: ${entry.lastVerifiedAt ?? "never"} | Result: ${entry.lastResult ?? "unknown"}`);
+        if (entry.source) {
+          lines.push(`  Source: ${entry.source}`);
+        }
+        lines.push("");
+      }
+
+      return {
+        content: [{ type: "text", text: lines.join("\n") }],
+        details: {
+          entries: entries.map(([id, e]) => ({ id, ...e })),
+          totalEntries: Object.keys(registry.entries).length,
+        },
+      };
+    },
+  });
 
   // ── Commit & push tool (VER calls after verification) ─────────────
 

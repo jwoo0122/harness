@@ -58,6 +58,78 @@ Three specialized roles operate in a **continuous check loop**. Critical constra
 
 ---
 
+## Cumulative Verification Registry
+
+Execute mode maintains a **Verification Registry** — a persistent catalog that records HOW each acceptance criterion is verified. The registry lives in the project at `.harness/verification-registry.json` and is committed alongside production code.
+
+### Why cumulative verification
+
+| Without registry | With registry |
+|---|---|
+| VER invents verification ad-hoc per increment | VER re-runs recorded, proven verification methods |
+| Regression checks are shallow ("test suite passes") | Every past AC has a specific, reproducible verification |
+| Verification knowledge is lost between iterations | Catalog grows with each iteration, carries forward |
+| Quality floor is implicit and drifts | Quality floor is explicit and enforced |
+
+### What VER records
+
+For each AC that passes, VER registers:
+- **strategy** — how it's verified (`automated-test`, `type-check`, `build-output`, `lint-rule`, `manual-check`, etc.)
+- **command** — the exact command to re-run the verification (if applicable)
+- **files** — test or verification files involved
+- **description** — human-readable explanation of what's being checked
+
+### When to register
+
+VER registers a verification method immediately after marking an AC as passed (Phase 2d). If a passing AC has no registered verification method, this is a **gap** — PLN should challenge VER.
+
+### When to consult
+
+During regression checks (Phase 2e), VER pulls the full registry and re-runs every registered verification. A regression is not just "does the test suite pass" — it's "does every individual AC's specific verification still hold."
+
+### Registry lifecycle
+
+```
+Iteration 1: VER verifies AC-1.1, AC-1.2
+             → registers 2 methods → registry has 2 entries
+
+Iteration 2: VER verifies AC-2.1, AC-2.2
+             → registers 2 methods → registry has 4 entries
+             → regression check re-runs all 4 registered verifications
+
+Iteration 3: VER verifies AC-3.1
+             → registers 1 method → registry has 5 entries
+             → regression check re-runs all 5 registered verifications
+
+...quality floor only rises, never falls.
+```
+
+### Registry file format
+
+`.harness/verification-registry.json`:
+```json
+{
+  "$schema": "harness-verification-registry-v1",
+  "entries": {
+    "AC-1.1": {
+      "requirement": "User can log in with email",
+      "source": "iteration-4-criteria.md",
+      "verification": {
+        "strategy": "automated-test",
+        "command": "npm test -- --grep 'login with email'",
+        "files": ["tests/auth/login.test.ts"],
+        "description": "Integration test verifying email login returns valid session"
+      },
+      "registeredAt": "INC-1",
+      "lastVerifiedAt": "INC-7",
+      "lastResult": "pass"
+    }
+  }
+}
+```
+
+---
+
 ## Procedure
 
 ### Phase 0 — Pre-flight (VER leads, PLN reviews)
@@ -78,6 +150,8 @@ VER records:
   - Lint warning count: [N]
   - Tests: [passed]/[total]
   - Build: pass/fail
+  - Verification Registry: [N] entries loaded from .harness/verification-registry.json
+  - If registry exists, VER re-runs ALL registered verifications as part of baseline
 
 PLN reviews:
   - Baseline failure → STOP. IMP fixes baseline first.
@@ -152,6 +226,8 @@ Based on what changed, invoke project-specific verification:
 - UI/renderer changes → visual/accessibility verification
 - API changes → integration tests
 
+VER should design verifications that are **registrable** — specific, reproducible commands that can be re-run in future regression checks. Prefer automated tests over manual inspection. "I eyeballed it" is not a registrable verification.
+
 #### 2d. VER checks ACs
 
 **VER** — and ONLY VER — marks AC status:
@@ -169,24 +245,53 @@ Based on what changed, invoke project-specific verification:
 📋 PLN reviews: "AC-1.3 — VER checked names but not types" → VER re-verifies
 ```
 
-#### 2e. VER regression check
+After marking an AC as ✅ PASS, VER **MUST** register the verification method:
 
-After every increment, VER re-checks ALL previously-passing ACs:
+**If running inside pi with the harness extension**, VER calls `harness_verify_register`:
+```
+harness_verify_register({
+  ac_id: "AC-1.1",
+  requirement: "User can log in with email",
+  strategy: "automated-test",
+  command: "npm test -- --grep 'login with email'",
+  files: ["tests/auth/login.test.ts"],
+  description: "Integration test verifying email login returns valid session",
+  increment: "INC-1"
+})
+```
+
+**If running without the extension**, append the entry to `.harness/verification-registry.json`.
+
+A passing AC without a registered verification method is a **gap**. PLN should challenge: "How will we catch regressions for this AC in future increments?"
+
+#### 2e. VER regression check (registry-driven)
+
+After every increment, VER consults the **Verification Registry** and re-runs ALL registered verifications — not just a general test suite pass.
+
+**Step 1**: Call `harness_verify_list` (or read `.harness/verification-registry.json`) to get all registered methods.
+
+**Step 2**: Re-run every registered verification command.
+
+**Step 3**: Report per-entry results:
 
 ```markdown
 ✅ VER: Regression scan after INC-[N]
-Previously passing: AC-1.1, AC-1.2
-- AC-1.1: still ✅
-- AC-1.2: ❌ REGRESSED — [cause]
+Registry entries: [total]
 
-🚨 REGRESSION → STOP
+| AC     | Strategy        | Command                           | Result        |
+|--------|----------------|-----------------------------------|---------------|
+| AC-1.1 | automated-test | npm test -- --grep 'login'        | ✅ still pass  |
+| AC-1.2 | type-check     | tsc --noEmit                      | ✅ still pass  |
+| AC-2.1 | automated-test | npm test -- --grep 'user profile' | ❌ REGRESSED   |
+
+🚨 REGRESSION in AC-2.1 → STOP
 ```
 
 On regression:
-1. VER reports with evidence
+1. VER reports with the **specific failing verification command and its output**
 2. PLN decides: fix forward or revert
-3. IMP executes
-4. VER re-verifies everything
+3. IMP executes the fix
+4. VER re-runs the **full registry** — not just the failed entry
 5. **No increment advances past a known regression.**
 
 #### 2f. Commit & push verified increment (VER triggers)
@@ -271,6 +376,9 @@ Criteria text is the tiebreaker. Ambiguous criteria → STOP, ask user.
 - ❌ Proceeding past a VER STOP signal
 - ❌ Roles collapsing ("I'll just quickly check it myself")
 - ❌ Creative exploration beyond the criteria (→ use /explore)
+- ❌ VER passing an AC without registering a verification method
+- ❌ Running regression checks without consulting the Verification Registry
+- ❌ Registering "manual-check" when an automated verification is feasible
 
 ## Transition Rules
 
