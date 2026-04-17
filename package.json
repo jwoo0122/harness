@@ -1,0 +1,22 @@
+{
+  "name": "@jwoo0122/harness",
+  "version": "0.1.0",
+  "description": "Two-mode cognitive harness for AI coding agents: divergent exploration (3-persona debate) and convergent execution (3-role mutual verification). Works as pure skills in any harness; gains enforcement powers as a pi extension.",
+  "keywords": ["pi-package", "agent-skills", "cognitive-harness", "debate", "verification"],
+  "license": "MIT",
+  "author": "jinwoo",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jwoo0122/harness"
+  },
+  "pi": {
+    "extensions": ["./extensions/index.ts"],
+    "skills": ["./skills"],
+    "prompts": ["./prompts"]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "@sinclair/typebox": "*"
+  }
+}
