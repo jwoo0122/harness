@@ -10,7 +10,7 @@ You are now in **divergent mode** with a **three-persona debate system**.
 
 Arguments: $ARGUMENTS — a topic, question, or blank (defaults to "next iteration").
 
-> **Harness note:** This skill is project-agnostic. It works in any AI coding agent (Claude Code, Codex, pi, etc.). When running inside pi with the `@jwoo0122/harness` extension, write/edit/bash-mutation tools are automatically blocked in this mode.
+> **Harness note:** This skill is project-agnostic. It works in any AI coding agent (Claude Code, Codex, pi, etc.). When running inside pi with the `@jwoo0122/harness` extension, write/edit/bash-mutation tools are automatically blocked, structured web evidence is enforced, and a real isolated OPT/PRA/SKP subagent pass is required before final synthesis.
 
 ---
 
@@ -92,6 +92,8 @@ Research broadly (all personas contribute, no debate yet):
 5. **Wild field** — cross-domain analogies (game engines, compilers, databases, anything).
 
 ### Phase 3 — The Debate (core of this skill)
+
+In pi with the harness extension, begin by collecting a real isolated subagent pass (OPT / PRA / SKP) and treat those outputs as Round-1 inputs. Outside pi, simulate the same separation within a single transcript.
 
 For each significant decision point, run **3 rounds**:
 

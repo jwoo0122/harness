@@ -15,8 +15,8 @@ A pi package that provides two complementary thinking modes:
 
 Single-agent systems suffer from **self-affirmation bias** — the same brain that writes code also evaluates whether that code is correct. The harness forces structured role separation:
 
-- In **Explore**: three emotional lenses debate. No unanimous agreement allowed in Round 1. Unsupported claims are struck from the record.
-- In **Execute**: three professional roles check each other. The Implementer cannot mark their own acceptance criteria as passed — only the Verifier can. The Verifier cannot write code. The Planner cannot run tests.
+- In **Explore**: three emotional lenses debate. In pi, these can run as **real isolated subagents** before synthesis. No unanimous agreement allowed in Round 1. Unsupported claims are struck from the record.
+- In **Execute**: three professional roles check each other. In pi, PLN / IMP / VER can run as **real isolated subagents** and the parent execute agent becomes an orchestrator. The Implementer cannot mark their own acceptance criteria as passed — only the Verifier can. The Verifier cannot write code. The Planner cannot run tests.
 
 ## Installation
 
@@ -28,7 +28,10 @@ pi install git:github.com/jwoo0122/harness
 
 This gives you:
 - `/explore` and `/execute` commands with mode switching
-- **Tool enforcement**: write/edit/build blocked in explore mode
+- **Real explore subagents**: isolated OPT / PRA / SKP `pi` subprocesses before synthesis
+- **Real execute subagents**: isolated PLN / IMP / VER `pi` subprocesses for planning, implementation, and verification
+- **Tool enforcement**: write/edit/build blocked in explore mode, and main `/execute` runs as orchestration-only
+- **External evidence gate**: structured web search/fetch required for ecosystem claims
 - **TUI widgets**: mode indicator in footer, AC status dashboard
 - **State persistence**: AC tracking survives session restarts
 - **Keyboard shortcut**: `Ctrl+Shift+H` to cycle modes
@@ -59,9 +62,10 @@ The skills work standalone as pure Markdown protocols — no extension needed. Y
 
 The agent will:
 1. Gather project context (read-only)
-2. Research broadly across the ecosystem
-3. Run a 3-round debate with cross-examination
-4. Produce a synthesis document at `target/explore/`
+2. Run isolated OPT / PRA / SKP subagents for first-pass positions
+3. Research broadly across the ecosystem with explicit external citations
+4. Run a 3-round debate with cross-examination
+5. Produce a synthesis document at `target/explore/`
 
 ### Execute mode
 
@@ -70,10 +74,11 @@ The agent will:
 ```
 
 The agent will:
-1. Run pre-flight baseline checks
-2. Decompose criteria into micro-increments (≤3 files each)
-3. For each increment: implement → gate check → verify → AC checkpoint → regression scan
-4. Produce an execution report at `target/execute/`
+1. Orchestrate isolated PLN / IMP / VER subagents instead of collapsing roles into one context
+2. Run pre-flight baseline checks
+3. Decompose criteria into micro-increments (≤3 files each)
+4. For each increment: implement → gate check → verify → AC checkpoint → regression scan
+5. Produce an execution report at `target/execute/`
 
 ### Quick templates
 
@@ -92,7 +97,8 @@ The agent will:
 harness/
 ├── package.json              # pi package manifest
 ├── extensions/
-│   └── index.ts              # Mode management, tool enforcement, TUI, state
+│   ├── index.ts              # Mode management, tool enforcement, TUI, state
+│   └── subagents.ts          # Shared subprocess subagent runtime for explore + execute
 ├── skills/
 │   ├── explore/SKILL.md      # 3-persona debate protocol (works standalone)
 │   └── execute/SKILL.md      # 3-role verification protocol (works standalone)
@@ -106,10 +112,11 @@ harness/
 ### Skills are self-contained
 Each SKILL.md works without the extension. The extension adds enforcement — it doesn't change the protocol. This means the same skills can be used in Claude Code, Codex, or any agent that supports the [Agent Skills standard](https://agentskills.io).
 
-### Extension adds three layers
-1. **Tool gating** — explore mode blocks write/edit/build via `tool_call` events
-2. **State tracking** — AC statuses persist in the session via `appendEntry`
-3. **TUI feedback** — footer status + widget show current mode, AC progress
+### Extension adds four layers
+1. **Tool gating** — explore mode blocks write/edit/build, and main execute mode blocks direct implementation commands in favor of role delegation
+2. **Isolated subagents** — `/explore` and `/execute` can invoke real subprocess agents with role-specific tool policies
+3. **State tracking** — AC statuses persist in the session via `appendEntry`
+4. **TUI feedback** — footer status + widget show current mode, AC progress
 
 ### No project-specific assumptions
 The skills reference generic concepts ("formatter check", "linter", "test suite") rather than specific tools. They adapt to any tech stack.

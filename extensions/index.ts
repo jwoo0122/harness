@@ -1,13 +1,21 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { isToolCallEventType } from "@mariozechner/pi-coding-agent";
-import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  type HarnessSubagentRunResult,
+  type HarnessSubagentSpec,
+  type SubagentBashPolicy,
+  formatPriorSubagentOutputs,
+  runHarnessSubagentBatch,
+} from "./subagents.js";
 
 // ─── Types ────────────────────────────────────────────────────────────
 
 type Mode = "explore" | "execute" | "off";
+type SearchBackend = "duckduckgo" | "searxng" | "tavily";
 type ExplorePersona = "OPT" | "PRA" | "SKP";
 type ExecuteRole = "PLN" | "IMP" | "VER";
 
@@ -28,7 +36,78 @@ interface HarnessState {
   commitCount: number;
 }
 
-// ─── Verification Registry ───────────────────────────────────────────────
+interface ExploreEvidenceTotals {
+  searches: number;
+  fetches: number;
+  subagentRuns: number;
+  sources: Set<string>;
+  retries: number;
+}
+
+interface ExploreEvidenceChain {
+  active: boolean;
+  searches: number;
+  fetches: number;
+  subagentRuns: number;
+  browserResearchCalls: number;
+  sources: Set<string>;
+  retries: number;
+}
+
+interface ExploreSubagentResult {
+  persona: ExplorePersona;
+  label: string;
+  topic: string;
+  output: string;
+  citations: string[];
+  searches: number;
+  fetches: number;
+  exitCode: number;
+  stderr: string;
+  model?: string;
+}
+
+interface ExploreSubagentToolDetails {
+  topic: string;
+  completed: number;
+  total: number;
+  results: ExploreSubagentResult[];
+}
+
+interface ExecuteSubagentResult {
+  role: ExecuteRole;
+  label: string;
+  objective: string;
+  output: string;
+  citations: string[];
+  toolCalls: Record<string, number>;
+  exitCode: number;
+  stderr: string;
+  model?: string;
+}
+
+interface ExecuteSubagentToolDetails {
+  objective: string;
+  mode: "parallel" | "sequential";
+  completed: number;
+  total: number;
+  roles: ExecuteRole[];
+  results: ExecuteSubagentResult[];
+}
+
+interface ExecuteSubagentTotals {
+  subagentRuns: number;
+  roleRuns: Record<ExecuteRole, number>;
+}
+
+interface WebSearchResult {
+  title: string;
+  url: string;
+  snippet?: string;
+  source: string;
+}
+
+// ─── Verification Registry ───────────────────────────────────────────
 
 interface VerificationEntry {
   requirement: string;
@@ -51,6 +130,272 @@ interface VerificationRegistry {
 
 const REGISTRY_DIR = ".harness";
 const REGISTRY_FILE = "verification-registry.json";
+const CURRENT_EXTENSION_PATH = fileURLToPath(import.meta.url);
+const IS_SUBAGENT_CHILD = process.env.HARNESS_SUBAGENT_CHILD === "1";
+const CHILD_SUBAGENT_MODE = process.env.HARNESS_SUBAGENT_MODE as Mode | undefined;
+const CHILD_SUBAGENT_ROLE = process.env.HARNESS_SUBAGENT_ROLE ?? "";
+const CHILD_SUBAGENT_TOOLS = (process.env.HARNESS_SUBAGENT_TOOLS ?? "")
+  .split(",")
+  .map((tool) => tool.trim())
+  .filter(Boolean);
+const CHILD_SUBAGENT_BASH_POLICY = (process.env.HARNESS_SUBAGENT_BASH_POLICY ?? "none") as SubagentBashPolicy;
+const SAFE_EXPLORE_TOOL_NAMES = new Set([
+  "read",
+  "bash",
+  "grep",
+  "find",
+  "ls",
+  "harness_web_search",
+  "harness_web_fetch",
+  "harness_explore_subagents",
+]);
+const SAFE_EXECUTE_TOOL_NAMES = new Set([
+  "read",
+  "grep",
+  "find",
+  "ls",
+  "harness_web_search",
+  "harness_web_fetch",
+  "harness_execute_subagents",
+  "harness_verify_register",
+  "harness_verify_list",
+  "harness_commit",
+]);
+const SAFE_SUBAGENT_CHILD_TOOL_NAMES = new Set([
+  "read",
+  "grep",
+  "find",
+  "ls",
+  "harness_web_search",
+  "harness_web_fetch",
+]);
+
+const EXPLORE_SUBAGENT_ROLES: Array<{
+  persona: ExplorePersona;
+  label: string;
+  icon: string;
+  stance: string;
+  challengeFocus: string;
+}> = [
+  {
+    persona: "OPT",
+    label: "Optimist",
+    icon: "🔴",
+    stance: "Push for upside, leverage, compounding effects, and the strongest ambitious path.",
+    challengeFocus: "Explain what becomes possible if the team accepts more short-term complexity.",
+  },
+  {
+    persona: "PRA",
+    label: "Pragmatist",
+    icon: "🟡",
+    stance: "Focus on what actually ships, sequencing, effort/reward, and reversible decisions.",
+    challengeFocus: "Explain the smallest viable path that preserves most of the upside.",
+  },
+  {
+    persona: "SKP",
+    label: "Skeptic",
+    icon: "🟢",
+    stance: "Pressure-test assumptions, failure modes, operational burden, and hidden constraints.",
+    challengeFocus: "Explain what is likely to break and what evidence is still missing.",
+  },
+];
+
+const EXECUTE_SUBAGENT_ROLES: Array<{
+  role: ExecuteRole;
+  label: string;
+  icon: string;
+  activeTools: string[];
+  bashPolicy: SubagentBashPolicy;
+  mission: string;
+  outputFormat: string[];
+}> = [
+  {
+    role: "PLN",
+    label: "Planner",
+    icon: "📋",
+    activeTools: ["read", "grep", "find", "ls", "harness_web_search", "harness_web_fetch"],
+    bashPolicy: "read-only",
+    mission: "Decide what to build and in what order. Decompose work, cover ACs, and challenge gaps.",
+    outputFormat: [
+      "## Plan",
+      "## AC coverage",
+      "## Risks / dependencies",
+      "## Challenges to IMP and VER",
+    ],
+  },
+  {
+    role: "IMP",
+    label: "Implementer",
+    icon: "🔨",
+    activeTools: ["read", "bash", "edit", "write", "grep", "find", "ls"],
+    bashPolicy: "implement",
+    mission: "Implement the requested increment only. Report changes and concerns, but never declare ACs passed.",
+    outputFormat: [
+      "## Implementation summary",
+      "## Files changed",
+      "## Commands run",
+      "## Known concerns / handoff to VER",
+    ],
+  },
+  {
+    role: "VER",
+    label: "Verifier",
+    icon: "✅",
+    activeTools: ["read", "bash", "grep", "find", "ls"],
+    bashPolicy: "verify",
+    mission: "Run gates, verify AC evidence, detect regressions, and challenge unsupported completion claims.",
+    outputFormat: [
+      "## Gate results",
+      "## Verification evidence",
+      "## AC verdict",
+      "## Regressions / blockers / challenges",
+    ],
+  },
+];
+
+const READ_ONLY_BASH_PREFIXES = [
+  "ls",
+  "head",
+  "tail",
+  "wc",
+  "grep",
+  "rg",
+  "ag",
+  "find",
+  "tree",
+  "file",
+  "stat",
+  "du",
+  "df",
+  "echo",
+  "printf",
+  "date",
+  "which",
+  "where",
+  "type",
+  "env",
+  "printenv",
+  "uname",
+  "pwd",
+  "sort",
+  "cut",
+  "awk",
+  "jq",
+  "git log",
+  "git show",
+  "git diff",
+  "git status",
+  "git branch",
+  "git tag",
+  "git remote",
+  "git rev-parse",
+  "git grep",
+  "cargo search",
+  "cargo doc",
+  "rustup show",
+  "npm search",
+  "npm info",
+  "npm view",
+  "pnpm search",
+  "pnpm info",
+  "pip show",
+  "pip list",
+  "agent-browser",
+  "npx agent-browser",
+];
+
+const MUTATING_BASH_PREFIXES = [
+  "rm",
+  "mv",
+  "cp",
+  "mkdir",
+  "touch",
+  "chmod",
+  "chown",
+  "git add",
+  "git commit",
+  "git push",
+  "git pull",
+  "git merge",
+  "git rebase",
+  "git switch",
+  "git checkout",
+  "git restore",
+  "cargo build",
+  "cargo run",
+  "cargo test",
+  "cargo install",
+  "cargo xtask",
+  "npm run",
+  "npm install",
+  "npm ci",
+  "yarn",
+  "pnpm install",
+  "pnpm add",
+  "make",
+  "cmake",
+  "python",
+  "node",
+  "deno",
+  "bun run",
+  "docker",
+  "kubectl",
+];
+
+const RAW_NETWORK_BASH_PREFIXES = [
+  "curl",
+  "wget",
+  "http",
+  "https",
+  "xh",
+  "lynx",
+  "links",
+  "elinks",
+];
+
+const VERIFY_BASH_PREFIXES = [
+  ...READ_ONLY_BASH_PREFIXES,
+  "cargo test",
+  "cargo build",
+  "cargo check",
+  "cargo clippy",
+  "cargo fmt",
+  "npm test",
+  "npm run",
+  "pnpm test",
+  "pnpm run",
+  "yarn test",
+  "yarn run",
+  "bun test",
+  "bun run",
+  "deno test",
+  "deno check",
+  "pytest",
+  "python -m pytest",
+  "python -m unittest",
+  "jest",
+  "vitest",
+  "eslint",
+  "prettier",
+  "tsc",
+  "ruff",
+  "mypy",
+  "go test",
+  "go build",
+  "go vet",
+  "gradle test",
+  "gradle build",
+  "./gradlew test",
+  "./gradlew build",
+  "mvn test",
+  "mvn verify",
+  "mvn package",
+  "make test",
+  "make build",
+  "make check",
+  "make lint",
+  "make verify",
+];
 
 async function readRegistry(cwd: string): Promise<VerificationRegistry> {
   try {
@@ -64,50 +409,612 @@ async function readRegistry(cwd: string): Promise<VerificationRegistry> {
 async function writeRegistry(cwd: string, registry: VerificationRegistry): Promise<void> {
   const dir = join(cwd, REGISTRY_DIR);
   await mkdir(dir, { recursive: true });
-  await writeFile(join(dir, REGISTRY_FILE), JSON.stringify(registry, null, 2) + "\n", "utf-8");
+  await writeFile(join(cwd, REGISTRY_DIR, REGISTRY_FILE), JSON.stringify(registry, null, 2) + "\n", "utf-8");
 }
 
-// ─── Mutating tools blocked in explore mode ───────────────────────────
+// ─── Web search helpers ──────────────────────────────────────────────
 
-const MUTATING_TOOLS = new Set(["write", "edit", "bash"]);
+function decodeHtmlEntities(input: string): string {
+  return input
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(Number(dec)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(Number.parseInt(hex, 16)))
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, " ");
+}
 
-function isMutatingBashCommand(command: string): boolean {
-  // Allow read-only bash: ls, cat, grep, find, rg, ag, head, tail, wc, etc.
-  const readOnlyPrefixes = [
-    "ls", "cat", "head", "tail", "wc", "grep", "rg", "ag", "find",
-    "tree", "file", "stat", "du", "df", "echo", "printf", "date",
-    "which", "where", "type", "env", "printenv", "uname",
-    "cargo search", "cargo doc", "rustup", "npm search", "npm info",
-    "pip show", "pip list", "pip search",
-    "git log", "git show", "git diff", "git status", "git branch",
-    "git tag", "git remote", "git rev-parse",
-    "curl -s", "curl --silent", "curl -sf",
-  ];
+function stripTags(input: string): string {
+  return decodeHtmlEntities(input.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+}
 
+function htmlToText(html: string): string {
+  const withoutNoise = html
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, " ")
+    .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, " ")
+    .replace(/<noscript\b[^<]*(?:(?!<\/noscript>)<[^<]*)*<\/noscript>/gi, " ")
+    .replace(/<svg\b[^<]*(?:(?!<\/svg>)<[^<]*)*<\/svg>/gi, " ")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n\n")
+    .replace(/<\/div>/gi, "\n")
+    .replace(/<\/li>/gi, "\n")
+    .replace(/<li\b[^>]*>/gi, "\n- ")
+    .replace(/<\/(h[1-6]|section|article|main|header|footer|tr)>/gi, "\n");
+
+  const text = stripTags(withoutNoise)
+    .replace(/\r/g, "")
+    .split("\n")
+    .map((line) => line.replace(/[ \t]+/g, " ").trim())
+    .filter(Boolean)
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n");
+
+  return text;
+}
+
+function extractTitleFromHtml(html: string): string | undefined {
+  const match = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  return match ? stripTags(match[1]) : undefined;
+}
+
+function normalizeSourceUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    parsed.hash = "";
+    return parsed.toString();
+  } catch {
+    return url.trim();
+  }
+}
+
+function unwrapDuckDuckGoUrl(url: string): string {
+  try {
+    const parsed = new URL(url, "https://duckduckgo.com");
+    if (parsed.hostname.endsWith("duckduckgo.com") && parsed.pathname.startsWith("/l/")) {
+      const redirected = parsed.searchParams.get("uddg");
+      if (redirected) return decodeURIComponent(redirected);
+    }
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
+function uniqueUrls(urls: Iterable<string>): string[] {
+  const deduped = new Set<string>();
+  for (const url of urls) {
+    const normalized = normalizeSourceUrl(url);
+    if (normalized) deduped.add(normalized);
+  }
+  return [...deduped];
+}
+
+function modelToCliSpec(model: { provider?: string; id?: string } | undefined): string | undefined {
+  if (!model?.provider || !model?.id) return undefined;
+  return `${model.provider}/${model.id}`;
+}
+
+function buildExploreSubagentSystemPrompt(
+  role: { persona: ExplorePersona; label: string; stance: string; challengeFocus: string },
+): string {
+  return [
+    "[HARNESS EXPLORE SUBAGENT]",
+    `You are ${role.persona} (${role.label}) in an isolated explore subagent.`,
+    role.stance,
+    `Primary challenge focus: ${role.challengeFocus}`,
+    "",
+    "Operating rules:",
+    "- You are a real isolated subagent, not a role-played paragraph in the main context.",
+    "- Use only read-only local inspection and structured web evidence tools.",
+    "- You MUST use harness_web_search at least once before making ecosystem or prior-art claims.",
+    "- You MUST use harness_web_fetch on at least one URL you intend to rely on.",
+    "- External claims without explicit URL citations are forbidden.",
+    "- Local codebase claims should cite file paths.",
+    "- Do not write files, edit code, or suggest implementation as already decided.",
+    "- Return concise markdown with citations inline.",
+  ].join("\n");
+}
+
+function buildExploreSubagentTask(
+  role: { persona: ExplorePersona; label: string; icon: string },
+  topic: string,
+  projectContext?: string,
+): string {
+  return [
+    `${role.icon} ${role.persona} isolated explore pass`,
+    "",
+    `Topic: ${topic}`,
+    projectContext ? `Project context: ${projectContext}` : "",
+    "",
+    "Required workflow:",
+    "1. Briefly inspect the relevant local codebase/docs if helpful.",
+    "2. Search the web for external evidence relevant to the topic.",
+    "3. Fetch at least one strong source you plan to cite.",
+    "4. Produce your position in markdown.",
+    "",
+    "Required output format:",
+    `## ${role.persona} thesis`,
+    "## Evidence",
+    "- Local: [file-path] claim",
+    "- External: [URL] claim",
+    "## Attacks on the other two personas",
+    "## Surviving recommendation",
+    "## Confidence",
+    "",
+    "Any claim without a file path or URL must be marked [UNVERIFIED].",
+  ].filter(Boolean).join("\n");
+}
+
+function summarizeExploreSubagentProgress(details: ExploreSubagentToolDetails): string {
+  const completedLabels = details.results.map((result) => result.persona).join(", ") || "none";
+  return `Running explore subagents for \"${details.topic}\" — ${details.completed}/${details.total} complete (${completedLabels})`;
+}
+
+function formatExploreSubagentResults(details: ExploreSubagentToolDetails): string {
+  const totalSearches = details.results.reduce((sum, result) => sum + result.searches, 0);
+  const totalFetches = details.results.reduce((sum, result) => sum + result.fetches, 0);
+  const totalUrls = uniqueUrls(details.results.flatMap((result) => result.citations)).length;
+
+  const lines: string[] = [];
+  lines.push(`Explore subagents completed for: ${details.topic}`);
+  lines.push(`Coverage: ${details.results.length}/${details.total} personas | 🔎 ${totalSearches} searches | 🌐 ${totalFetches} fetches | 🔗 ${totalUrls} URLs`);
+  lines.push("");
+
+  for (const result of details.results) {
+    lines.push(`## ${result.label} (${result.persona})`);
+    lines.push(`Exit: ${result.exitCode === 0 ? "success" : `error ${result.exitCode}`}`);
+    lines.push(`Evidence: 🔎 ${result.searches} | 🌐 ${result.fetches} | 🔗 ${result.citations.length}`);
+    if (result.model) lines.push(`Model: ${result.model}`);
+    if (result.citations.length > 0) lines.push(`Citations: ${result.citations.join(", ")}`);
+    lines.push("");
+    lines.push(result.output || "[No assistant output captured]");
+    if (result.stderr.trim()) {
+      lines.push("");
+      lines.push(`stderr: ${result.stderr.trim()}`);
+    }
+    lines.push("");
+  }
+
+  lines.push("Use these isolated subagent positions as Round-1 inputs, then continue the debate and synthesize only what survives with citations.");
+  return lines.join("\n");
+}
+
+function buildExecuteRoleSystemPrompt(
+  role: { role: ExecuteRole; label: string; mission: string; outputFormat: string[] },
+): string {
+  const prohibitions = role.role === "PLN"
+    ? ["Do not write code.", "Do not mark ACs as passed.", "Do not run mutating commands."]
+    : role.role === "IMP"
+      ? ["Do not mark ACs as passed.", "Do not commit or push git changes.", "Stay inside the assigned implementation scope."]
+      : ["Do not write production code.", "Do not change the increment plan.", "Do not hand-wave. Show evidence."];
+
+  return [
+    "[HARNESS EXECUTE SUBAGENT]",
+    `You are ${role.role} (${role.label}) in an isolated execute subagent.`,
+    role.mission,
+    "",
+    "Operating rules:",
+    "- You are a real isolated subagent, not an internal monologue of the parent agent.",
+    ...prohibitions.map((line) => `- ${line}`),
+    "- Report in markdown only.",
+    "- If evidence is missing, say so explicitly.",
+    "- If you are blocked, describe the exact blocker and next handoff needed.",
+    "",
+    "Required sections:",
+    ...role.outputFormat.map((section) => `- ${section}`),
+  ].join("\n");
+}
+
+function buildExecuteRoleTask(
+  role: { role: ExecuteRole; label: string; icon: string },
+  objective: string,
+  context?: string,
+): string {
+  return [
+    `${role.icon} ${role.role} isolated execute pass`,
+    "",
+    `Objective: ${objective}`,
+    context ? `Context: ${context}` : "",
+    "",
+    "Stay in role. Use tools only if needed. Return concise markdown.",
+  ].filter(Boolean).join("\n");
+}
+
+function resolveExecuteRole(role: ExecuteRole) {
+  return EXECUTE_SUBAGENT_ROLES.find((entry) => entry.role === role)!;
+}
+
+function summarizeExecuteSubagentProgress(details: ExecuteSubagentToolDetails): string {
+  const completedLabels = details.results.map((result) => result.role).join(", ") || "none";
+  return `Running execute subagents for \"${details.objective}\" — ${details.completed}/${details.total} complete (${completedLabels})`;
+}
+
+function formatExecuteSubagentResults(details: ExecuteSubagentToolDetails): string {
+  const lines: string[] = [];
+  lines.push(`Execute subagents completed for: ${details.objective}`);
+  lines.push(`Mode: ${details.mode} | Roles: ${details.roles.join(", ")}`);
+  lines.push("");
+
+  for (const result of details.results) {
+    lines.push(`## ${result.label} (${result.role})`);
+    lines.push(`Exit: ${result.exitCode === 0 ? "success" : `error ${result.exitCode}`}`);
+    const toolSummary = Object.entries(result.toolCalls)
+      .map(([tool, count]) => `${tool}×${count}`)
+      .join(", ");
+    if (toolSummary) lines.push(`Tools: ${toolSummary}`);
+    if (result.model) lines.push(`Model: ${result.model}`);
+    lines.push("");
+    lines.push(result.output || "[No assistant output captured]");
+    if (result.stderr.trim()) {
+      lines.push("");
+      lines.push(`stderr: ${result.stderr.trim()}`);
+    }
+    lines.push("");
+  }
+
+  lines.push("Use these isolated role outputs as the authoritative PLN / IMP / VER perspectives for the current execute step.");
+  return lines.join("\n");
+}
+
+function mapExploreRunResult(topic: string, result: HarnessSubagentRunResult<ExplorePersona>): ExploreSubagentResult {
+  return {
+    persona: result.role,
+    label: result.label,
+    topic,
+    output: result.output,
+    citations: result.citations,
+    searches: result.toolCalls.harness_web_search ?? 0,
+    fetches: result.toolCalls.harness_web_fetch ?? 0,
+    exitCode: result.exitCode,
+    stderr: result.stderr,
+    model: result.model,
+  };
+}
+
+function mapExecuteRunResult(objective: string, result: HarnessSubagentRunResult<ExecuteRole>): ExecuteSubagentResult {
+  return {
+    role: result.role,
+    label: result.label,
+    objective,
+    output: result.output,
+    citations: result.citations,
+    toolCalls: result.toolCalls,
+    exitCode: result.exitCode,
+    stderr: result.stderr,
+    model: result.model,
+  };
+}
+
+function parseDuckDuckGoHtml(html: string, maxResults: number): WebSearchResult[] {
+  const results: WebSearchResult[] = [];
+  const seen = new Set<string>();
+  const linkRegex = /<a[^>]+class="[^"]*(?:result__a|result-link)[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+  let match: RegExpExecArray | null;
+
+  while ((match = linkRegex.exec(html)) !== null) {
+    const rawUrl = decodeHtmlEntities(match[1]);
+    const url = normalizeSourceUrl(unwrapDuckDuckGoUrl(rawUrl));
+    const title = stripTags(match[2]);
+
+    if (!title || !/^https?:\/\//i.test(url) || seen.has(url)) continue;
+
+    const windowHtml = html.slice(match.index, Math.min(html.length, match.index + 1800));
+    const snippetMatch = windowHtml.match(/<(?:a|div)[^>]+class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/(?:a|div)>/i);
+    const snippet = snippetMatch ? stripTags(snippetMatch[1]) : undefined;
+
+    seen.add(url);
+    results.push({ title, url, snippet, source: "duckduckgo" });
+
+    if (results.length >= maxResults) break;
+  }
+
+  return results;
+}
+
+function ensureHttpUrl(input: string): URL {
+  let parsed: URL;
+  try {
+    parsed = new URL(input);
+  } catch {
+    throw new Error(`Invalid URL: ${input}`);
+  }
+
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`Only http(s) URLs are supported. Received: ${parsed.protocol}`);
+  }
+
+  return parsed;
+}
+
+function getSearchBackend(requested?: string): SearchBackend {
+  const normalized = requested?.trim().toLowerCase();
+  if (normalized === "duckduckgo" || normalized === "searxng" || normalized === "tavily") {
+    return normalized;
+  }
+  if (process.env.TAVILY_API_KEY) return "tavily";
+  if (process.env.HARNESS_SEARXNG_URL) return "searxng";
+  return "duckduckgo";
+}
+
+async function searchWithDuckDuckGo(query: string, maxResults: number, signal?: AbortSignal): Promise<WebSearchResult[]> {
+  const response = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
+    method: "GET",
+    headers: {
+      "user-agent": "Mozilla/5.0 (compatible; harness-web-search/1.0)",
+      accept: "text/html,application/xhtml+xml",
+    },
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new Error(`DuckDuckGo search failed: ${response.status} ${response.statusText}`);
+  }
+
+  const html = await response.text();
+  const results = parseDuckDuckGoHtml(html, maxResults);
+  if (results.length === 0) {
+    throw new Error("DuckDuckGo search returned no parseable results. Configure TAVILY_API_KEY or HARNESS_SEARXNG_URL for a more structured backend.");
+  }
+  return results;
+}
+
+async function searchWithSearxng(query: string, maxResults: number, signal?: AbortSignal): Promise<WebSearchResult[]> {
+  const baseUrl = process.env.HARNESS_SEARXNG_URL;
+  if (!baseUrl) {
+    throw new Error("HARNESS_SEARXNG_URL is not set.");
+  }
+
+  const response = await fetch(`${baseUrl.replace(/\/$/, "")}/search?format=json&q=${encodeURIComponent(query)}`, {
+    headers: { accept: "application/json" },
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new Error(`SearXNG search failed: ${response.status} ${response.statusText}`);
+  }
+
+  const data = await response.json() as {
+    results?: Array<{ title?: string; url?: string; content?: string }>;
+  };
+
+  return (data.results ?? [])
+    .filter((item) => item.title && item.url)
+    .slice(0, maxResults)
+    .map((item) => ({
+      title: item.title!,
+      url: normalizeSourceUrl(item.url!),
+      snippet: item.content,
+      source: "searxng",
+    }));
+}
+
+async function searchWithTavily(query: string, maxResults: number, signal?: AbortSignal): Promise<WebSearchResult[]> {
+  const apiKey = process.env.TAVILY_API_KEY;
+  if (!apiKey) {
+    throw new Error("TAVILY_API_KEY is not set.");
+  }
+
+  const response = await fetch("https://api.tavily.com/search", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json",
+    },
+    body: JSON.stringify({
+      api_key: apiKey,
+      query,
+      max_results: maxResults,
+      search_depth: "advanced",
+      include_answer: false,
+      include_raw_content: false,
+    }),
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Tavily search failed: ${response.status} ${response.statusText}`);
+  }
+
+  const data = await response.json() as {
+    results?: Array<{ title?: string; url?: string; content?: string }>;
+  };
+
+  return (data.results ?? [])
+    .filter((item) => item.title && item.url)
+    .slice(0, maxResults)
+    .map((item) => ({
+      title: item.title!,
+      url: normalizeSourceUrl(item.url!),
+      snippet: item.content,
+      source: "tavily",
+    }));
+}
+
+async function runWebSearch(
+  query: string,
+  maxResults: number,
+  backend: SearchBackend,
+  signal?: AbortSignal,
+): Promise<{ backend: SearchBackend; results: WebSearchResult[] }> {
+  const results = backend === "tavily"
+    ? await searchWithTavily(query, maxResults, signal)
+    : backend === "searxng"
+      ? await searchWithSearxng(query, maxResults, signal)
+      : await searchWithDuckDuckGo(query, maxResults, signal);
+
+  return { backend, results: results.slice(0, maxResults) };
+}
+
+function extractAssistantText(message: any): string {
+  if (!message) return "";
+  if (typeof message.content === "string") return message.content;
+  if (Array.isArray(message.content)) {
+    return message.content
+      .filter((item: any) => item?.type === "text" && typeof item.text === "string")
+      .map((item: any) => item.text)
+      .join("\n");
+  }
+  if (typeof message.text === "string") return message.text;
+  return "";
+}
+
+function lastAssistantMessageText(messages: any[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message?.role === "assistant") return extractAssistantText(message);
+  }
+  return "";
+}
+
+function hasExternalCitation(text: string): boolean {
+  return /https?:\/\//i.test(text);
+}
+
+function extractUrlsFromText(text: string): string[] {
+  const matches = text.match(/https?:\/\/[^\s)\]>"']+/g) ?? [];
+  return uniqueUrls(matches);
+}
+
+// ─── Explore bash enforcement helpers ─────────────────────────────────
+
+function isAgentBrowserCommand(command: string): boolean {
   const trimmed = command.trim();
-  for (const prefix of readOnlyPrefixes) {
-    if (trimmed.startsWith(prefix)) return false;
+  return trimmed.startsWith("agent-browser") || trimmed.startsWith("npx agent-browser");
+}
+
+function classifyExploreBash(command: string): { allowed: boolean; reason?: string } {
+  const trimmed = command.trim();
+  if (!trimmed) {
+    return { allowed: false, reason: "Empty bash command." };
   }
 
-  // Block cargo build/test/run/install, npm run/install, make, etc.
-  const mutatingPrefixes = [
-    "rm", "mv", "cp", "mkdir", "touch", "chmod", "chown",
-    "cargo build", "cargo run", "cargo test", "cargo install", "cargo xtask",
-    "npm run", "npm install", "npm ci", "yarn", "pnpm",
-    "make", "cmake", "python", "node", "deno", "bun run",
-    "docker", "kubectl",
-  ];
-
-  for (const prefix of mutatingPrefixes) {
-    if (trimmed.startsWith(prefix)) return true;
+  if ((/[;&>|]/.test(trimmed) || /\btee\b/.test(trimmed)) && !isAgentBrowserCommand(trimmed)) {
+    return {
+      allowed: false,
+      reason: "Compound bash commands, pipes, and redirects are blocked in explore mode. Use structured tools or a single read-only command.",
+    };
   }
 
-  // Pipe chains, redirects, and semicolons are suspicious
-  if (/[|;>&]/.test(trimmed) && !trimmed.startsWith("grep") && !trimmed.startsWith("rg")) {
-    return true;
+  for (const prefix of RAW_NETWORK_BASH_PREFIXES) {
+    if (trimmed.startsWith(prefix)) {
+      return {
+        allowed: false,
+        reason: "Raw network bash commands are blocked in explore mode. Use harness_web_search for discovery and harness_web_fetch for source inspection so external evidence remains auditable.",
+      };
+    }
   }
 
-  return false;
+  for (const prefix of MUTATING_BASH_PREFIXES) {
+    if (trimmed.startsWith(prefix)) {
+      return {
+        allowed: false,
+        reason: `This bash command appears to mutate state (matched prefix: ${prefix}). Explore mode is strictly read-only.`,
+      };
+    }
+  }
+
+  for (const prefix of READ_ONLY_BASH_PREFIXES) {
+    if (trimmed.startsWith(prefix)) {
+      return { allowed: true };
+    }
+  }
+
+  return {
+    allowed: false,
+    reason: "Unknown bash command in explore mode. Use read/grep/find/ls for local inspection, or harness_web_search / harness_web_fetch for external research.",
+  };
+}
+
+function classifyExecuteBash(command: string): { allowed: boolean; reason?: string } {
+  const trimmed = command.trim();
+  if (!trimmed) {
+    return { allowed: false, reason: "Empty bash command." };
+  }
+
+  if (/[;&>|]/.test(trimmed) || /\btee\b/.test(trimmed)) {
+    return {
+      allowed: false,
+      reason: "Compound bash commands, pipes, and redirects are blocked for execute subagents. Run one verification/build command per tool call.",
+    };
+  }
+
+  for (const prefix of RAW_NETWORK_BASH_PREFIXES) {
+    if (trimmed.startsWith(prefix)) {
+      return {
+        allowed: false,
+        reason: "Raw network bash commands are blocked for execute subagents.",
+      };
+    }
+  }
+
+  for (const prefix of MUTATING_BASH_PREFIXES) {
+    if (trimmed.startsWith(prefix)) {
+      return {
+        allowed: false,
+        reason: `This bash command is blocked for execute subagents (matched prefix: ${prefix}). Use edit/write for code changes and reserve git mutations for harness_commit.`,
+      };
+    }
+  }
+
+  for (const prefix of VERIFY_BASH_PREFIXES) {
+    if (trimmed.startsWith(prefix)) {
+      return { allowed: true };
+    }
+  }
+
+  return {
+    allowed: false,
+    reason: "Unknown execute-mode bash command. Use focused build/test/lint/typecheck commands, or read/grep/find/ls for inspection.",
+  };
+}
+
+function classifyChildBashCommand(policy: SubagentBashPolicy, command: string): { allowed: boolean; reason?: string } {
+  switch (policy) {
+    case "none":
+      return { allowed: false, reason: "This subagent is not allowed to use bash." };
+    case "read-only":
+      return classifyExploreBash(command);
+    case "verify":
+    case "implement":
+      return classifyExecuteBash(command);
+    default:
+      return { allowed: false, reason: `Unknown child bash policy: ${policy}` };
+  }
+}
+
+function createExploreEvidenceTotals(): ExploreEvidenceTotals {
+  return {
+    searches: 0,
+    fetches: 0,
+    subagentRuns: 0,
+    sources: new Set<string>(),
+    retries: 0,
+  };
+}
+
+function createExploreEvidenceChain(): ExploreEvidenceChain {
+  return {
+    active: false,
+    searches: 0,
+    fetches: 0,
+    subagentRuns: 0,
+    browserResearchCalls: 0,
+    sources: new Set<string>(),
+    retries: 0,
+  };
+}
+
+function createExecuteSubagentTotals(): ExecuteSubagentTotals {
+  return {
+    subagentRuns: 0,
+    roleRuns: {
+      PLN: 0,
+      IMP: 0,
+      VER: 0,
+    },
+  };
 }
 
 // ─── Extension ────────────────────────────────────────────────────────
@@ -120,19 +1027,205 @@ export default function (pi: ExtensionAPI) {
     commitCount: 0,
   };
 
-  // ── State persistence ─────────────────────────────────────────────
+  let baselineActiveTools: string[] = [];
+  let exploreTotals = createExploreEvidenceTotals();
+  let exploreChain = createExploreEvidenceChain();
+  let executeTotals = createExecuteSubagentTotals();
+
+  function getActiveToolNames(): string[] {
+    const active = pi.getActiveTools() as Array<string | { name?: string }>;
+    return active
+      .map((tool) => typeof tool === "string" ? tool : tool?.name)
+      .filter((name): name is string => typeof name === "string");
+  }
+
+  function getAllToolNames(): string[] {
+    return pi.getAllTools().map((tool) => tool.name);
+  }
 
   function saveState() {
     pi.appendEntry("cognitive-harness-state", { ...state });
   }
 
+  function resetExploreTracking() {
+    exploreTotals = createExploreEvidenceTotals();
+    exploreChain = createExploreEvidenceChain();
+  }
+
+  function resetExecuteTracking() {
+    executeTotals = createExecuteSubagentTotals();
+  }
+
+  function beginExploreEvidenceChainIfNeeded() {
+    if (state.mode !== "explore") return;
+    if (!exploreChain.active) {
+      exploreChain = createExploreEvidenceChain();
+      exploreChain.active = true;
+    }
+  }
+
+  function recordExternalSources(urls: Iterable<string>) {
+    for (const url of uniqueUrls(urls)) {
+      exploreTotals.sources.add(url);
+      if (exploreChain.active) exploreChain.sources.add(url);
+    }
+  }
+
+  function markSearchUsage(urls: Iterable<string>) {
+    beginExploreEvidenceChainIfNeeded();
+    exploreTotals.searches += 1;
+    if (exploreChain.active) exploreChain.searches += 1;
+    recordExternalSources(urls);
+  }
+
+  function markFetchUsage(urls: Iterable<string>) {
+    beginExploreEvidenceChainIfNeeded();
+    exploreTotals.fetches += 1;
+    if (exploreChain.active) exploreChain.fetches += 1;
+    recordExternalSources(urls);
+  }
+
+  function markSubagentUsage(details: ExploreSubagentToolDetails | undefined) {
+    beginExploreEvidenceChainIfNeeded();
+    exploreTotals.subagentRuns += 1;
+    if (exploreChain.active) exploreChain.subagentRuns += 1;
+    if (!details) return;
+
+    exploreTotals.searches += details.results.reduce((sum, result) => sum + result.searches, 0);
+    exploreTotals.fetches += details.results.reduce((sum, result) => sum + result.fetches, 0);
+    if (exploreChain.active) {
+      exploreChain.searches += details.results.reduce((sum, result) => sum + result.searches, 0);
+      exploreChain.fetches += details.results.reduce((sum, result) => sum + result.fetches, 0);
+    }
+    recordExternalSources(details.results.flatMap((result) => result.citations));
+  }
+
+  function markBrowserResearch(command: string) {
+    beginExploreEvidenceChainIfNeeded();
+    exploreTotals.fetches += 1;
+    if (exploreChain.active) {
+      exploreChain.fetches += 1;
+      exploreChain.browserResearchCalls += 1;
+    }
+    recordExternalSources(extractUrlsFromText(command));
+  }
+
+  function markExecuteSubagentUsage(details: ExecuteSubagentToolDetails | undefined) {
+    executeTotals.subagentRuns += 1;
+    if (!details) return;
+
+    for (const result of details.results) {
+      executeTotals.roleRuns[result.role] += 1;
+    }
+  }
+
+  function setModeTools(mode: Mode) {
+    const all = new Set(getAllToolNames());
+
+    if (baselineActiveTools.length === 0) {
+      baselineActiveTools = getActiveToolNames();
+    }
+
+    if (mode === "explore") {
+      const safe = [...SAFE_EXPLORE_TOOL_NAMES].filter((name) => all.has(name));
+      pi.setActiveTools(safe);
+      return;
+    }
+
+    if (mode === "execute") {
+      const safe = [...SAFE_EXECUTE_TOOL_NAMES].filter((name) => all.has(name));
+      pi.setActiveTools(safe);
+      return;
+    }
+
+    const target = new Set<string>([
+      ...baselineActiveTools,
+      ...SAFE_EXPLORE_TOOL_NAMES,
+      ...SAFE_EXECUTE_TOOL_NAMES,
+    ]);
+
+    pi.setActiveTools([...target].filter((name) => all.has(name)));
+  }
+
+  function updateUI(ctx: ExtensionContext) {
+    if (!ctx.hasUI) return;
+
+    if (state.mode === "explore") {
+      ctx.ui.setStatus(
+        "harness",
+        `🧠 EXPLORE 🤖${exploreTotals.subagentRuns} 🔎${exploreTotals.searches} 🌐${exploreTotals.fetches} 🔗${exploreTotals.sources.size}`,
+      );
+
+      const round = state.debateRound ?? 0;
+      const lines = [
+        "🧠 Explore Mode — Isolated Subagents + External Evidence Gate",
+        `Round: ${round}/3  |  🔴 OPT  🟡 PRA  🟢 SKP`,
+        `Evidence: 🤖 ${exploreTotals.subagentRuns} subagent rounds | 🔎 ${exploreTotals.searches} searches | 🌐 ${exploreTotals.fetches} fetches | 🔗 ${exploreTotals.sources.size} unique URLs | ↺ ${exploreTotals.retries} retries`,
+        "Tools: read-only local inspection + structured web research + mandatory isolated subagent pass",
+      ];
+      ctx.ui.setWidget("harness", lines);
+    }
+
+    if (state.mode === "execute") {
+      const passed = state.acStatuses.filter((a) => a.status === "pass").length;
+      const failed = state.acStatuses.filter((a) => a.status === "fail").length;
+      const pending = state.acStatuses.filter((a) => a.status === "pending").length;
+
+      ctx.ui.setStatus(
+        "harness",
+        `⚙️ EXECUTE 🤖${executeTotals.subagentRuns} ✅${passed} ❌${failed} ⏳${pending} 📦${state.commitCount}`,
+      );
+
+      const lines = [
+        "⚙️ Execute Mode — Isolated PLN / IMP / VER Subagents",
+        "📋 PLN → 🔨 IMP → ✅ VER → 📦 Commit",
+        `ACs: ✅ ${passed} | ❌ ${failed} | ⏳ ${pending} | Regressions: ${state.regressionCount} | Commits: ${state.commitCount}`,
+        `Subagents: 🤖 ${executeTotals.subagentRuns} runs | PLN ${executeTotals.roleRuns.PLN} | IMP ${executeTotals.roleRuns.IMP} | VER ${executeTotals.roleRuns.VER}`,
+      ];
+      if (state.currentIncrement) {
+        lines.push(`Current: ${state.currentIncrement}`);
+      }
+      ctx.ui.setWidget("harness", lines);
+    }
+
+    if (state.mode === "off") {
+      ctx.ui.setStatus("harness", undefined);
+      ctx.ui.setWidget("harness", undefined);
+    }
+  }
+
+  function endExploreEvidenceChain() {
+    exploreChain = createExploreEvidenceChain();
+  }
+
+  // ── State persistence ─────────────────────────────────────────────
+
   pi.on("session_start", async (_event, ctx) => {
     state = { mode: "off", acStatuses: [], regressionCount: 0, commitCount: 0 };
+    baselineActiveTools = getActiveToolNames();
+    resetExploreTracking();
+    resetExecuteTracking();
+
     for (const entry of ctx.sessionManager.getEntries()) {
       if (entry.type === "custom" && entry.customType === "cognitive-harness-state") {
-        state = entry.data as HarnessState;
+        state = {
+          mode: "off",
+          acStatuses: [],
+          regressionCount: 0,
+          commitCount: 0,
+          ...(entry.data as Partial<HarnessState>),
+        };
       }
     }
+
+    if (IS_SUBAGENT_CHILD) {
+      const childTools = (CHILD_SUBAGENT_TOOLS.length > 0 ? CHILD_SUBAGENT_TOOLS : [...SAFE_SUBAGENT_CHILD_TOOL_NAMES])
+        .filter((name) => getAllToolNames().includes(name));
+      pi.setActiveTools(childTools);
+      return;
+    }
+
+    setModeTools(state.mode);
     updateUI(ctx);
   });
 
@@ -144,10 +1237,12 @@ export default function (pi: ExtensionAPI) {
       state.mode = "explore";
       state.debateRound = 0;
       saveState();
+      resetExploreTracking();
+      resetExecuteTracking();
+      setModeTools("explore");
       updateUI(ctx);
-      ctx.ui.notify("🧠 Explore mode activated — write/edit/build tools blocked", "info");
+      ctx.ui.notify("🧠 Explore mode activated — isolated subagents + structured web evidence required", "info");
 
-      // Send the skill content as a user message to activate the protocol
       const topic = args || "next iteration";
       pi.sendUserMessage(`/skill:explore ${topic}`, { deliverAs: "followUp" });
     },
@@ -157,12 +1252,16 @@ export default function (pi: ExtensionAPI) {
     description: "Switch to agile execution mode (3-role verification)",
     handler: async (args, ctx) => {
       state.mode = "execute";
+      state.criteriaFile = args || undefined;
       state.currentIncrement = undefined;
       state.regressionCount = 0;
       state.commitCount = 0;
       saveState();
+      endExploreEvidenceChain();
+      resetExecuteTracking();
+      setModeTools("execute");
       updateUI(ctx);
-      ctx.ui.notify("⚙️ Execute mode activated — full tool access, AC tracking enabled", "info");
+      ctx.ui.notify("⚙️ Execute mode activated — orchestration-only parent + isolated role subagents enabled", "info");
 
       const criteria = args || "";
       pi.sendUserMessage(`/skill:execute ${criteria}`, { deliverAs: "followUp" });
@@ -174,8 +1273,10 @@ export default function (pi: ExtensionAPI) {
     handler: async (_args, ctx) => {
       state.mode = "off";
       saveState();
-      ctx.ui.setStatus("harness", undefined);
-      ctx.ui.setWidget("harness", undefined);
+      endExploreEvidenceChain();
+      resetExecuteTracking();
+      setModeTools("off");
+      updateUI(ctx);
       ctx.ui.notify("Cognitive harness disabled", "info");
     },
   });
@@ -192,42 +1293,189 @@ export default function (pi: ExtensionAPI) {
       lines.push(`Mode: ${state.mode}`);
 
       if (state.mode === "execute") {
-        const passed = state.acStatuses.filter(a => a.status === "pass").length;
-        const failed = state.acStatuses.filter(a => a.status === "fail").length;
-        const pending = state.acStatuses.filter(a => a.status === "pending").length;
+        const passed = state.acStatuses.filter((a) => a.status === "pass").length;
+        const failed = state.acStatuses.filter((a) => a.status === "fail").length;
+        const pending = state.acStatuses.filter((a) => a.status === "pending").length;
         lines.push(`ACs: ✅ ${passed} | ❌ ${failed} | ⏳ ${pending}`);
         lines.push(`Regressions: ${state.regressionCount}`);
+        lines.push(`Subagents: 🤖 ${executeTotals.subagentRuns} | PLN ${executeTotals.roleRuns.PLN} | IMP ${executeTotals.roleRuns.IMP} | VER ${executeTotals.roleRuns.VER}`);
         if (state.currentIncrement) lines.push(`Current: ${state.currentIncrement}`);
         if (state.criteriaFile) lines.push(`Criteria: ${state.criteriaFile}`);
       }
 
-      if (state.mode === "explore" && state.debateRound !== undefined) {
-        lines.push(`Debate round: ${state.debateRound}/3`);
+      if (state.mode === "explore") {
+        lines.push(`Debate round: ${state.debateRound ?? 0}/3`);
+        lines.push(`External evidence: 🤖 ${exploreTotals.subagentRuns} subagent rounds | 🔎 ${exploreTotals.searches} searches | 🌐 ${exploreTotals.fetches} fetches | 🔗 ${exploreTotals.sources.size} URLs | ↺ ${exploreTotals.retries} retries`);
       }
 
       ctx.ui.notify(lines.join("\n"), "info");
     },
   });
 
-  // ── Tool enforcement ──────────────────────────────────────────────
+  // ── External evidence tracking ─────────────────────────────────────
 
-  pi.on("tool_call", async (event, ctx) => {
+  pi.on("agent_start", async () => {
     if (state.mode !== "explore") return;
+    if (!exploreChain.active) {
+      beginExploreEvidenceChainIfNeeded();
+    }
+  });
 
-    // Block write and edit entirely in explore mode
-    if (event.toolName === "write" || event.toolName === "edit") {
-      return {
-        block: true,
-        reason: `🔴 BLOCKED: "${event.toolName}" is not allowed in explore mode. Explore mode is read-only — no code modifications. Use /execute to switch to implementation mode.`,
-      };
+  pi.on("tool_result", async (event, ctx) => {
+    if (state.mode === "explore") {
+      if (event.toolName === "harness_explore_subagents") {
+        const details = event.details as ExploreSubagentToolDetails | undefined;
+        markSubagentUsage(details);
+        updateUI(ctx);
+        return;
+      }
+
+      if (event.toolName === "harness_web_search") {
+        const details = event.details as { results?: Array<{ url?: string }> } | undefined;
+        markSearchUsage((details?.results ?? []).map((item) => item.url).filter((url): url is string => Boolean(url)));
+        updateUI(ctx);
+        return;
+      }
+
+      if (event.toolName === "harness_web_fetch") {
+        const details = event.details as { finalUrl?: string } | undefined;
+        markFetchUsage(details?.finalUrl ? [details.finalUrl] : []);
+        updateUI(ctx);
+        return;
+      }
+
+      if (event.toolName === "bash") {
+        const input = event.input as { command?: string } | undefined;
+        const command = input?.command?.trim();
+        if (command && isAgentBrowserCommand(command)) {
+          markBrowserResearch(command);
+          updateUI(ctx);
+        }
+      }
+
+      return;
     }
 
-    // For bash, allow read-only commands, block mutating ones
-    if (isToolCallEventType("bash", event)) {
-      if (isMutatingBashCommand(event.input.command)) {
+    if (state.mode === "execute" && event.toolName === "harness_execute_subagents") {
+      const details = event.details as ExecuteSubagentToolDetails | undefined;
+      markExecuteSubagentUsage(details);
+      updateUI(ctx);
+    }
+  });
+
+  pi.on("agent_end", async (event, ctx) => {
+    if (state.mode !== "explore" || !exploreChain.active) return;
+
+    const finalText = lastAssistantMessageText(event.messages as any[]);
+    const usedSubagents = exploreChain.subagentRuns > 0;
+    const usedDiscovery = exploreChain.searches > 0 || exploreChain.browserResearchCalls > 0;
+    const usedInspection = exploreChain.fetches > 0;
+    const enoughSources = exploreChain.sources.size >= 2;
+    const citedSources = hasExternalCitation(finalText);
+    const compliant = usedSubagents && usedDiscovery && usedInspection && enoughSources && citedSources;
+
+    if (compliant) {
+      endExploreEvidenceChain();
+      updateUI(ctx);
+      return;
+    }
+
+    if (exploreChain.retries >= 1) {
+      ctx.ui.notify(
+        "Explore output still lacks sufficient external evidence after an automatic retry. Review citations manually or rerun /explore with a narrower topic.",
+        "warning",
+      );
+      endExploreEvidenceChain();
+      updateUI(ctx);
+      return;
+    }
+
+    exploreChain.retries += 1;
+    exploreTotals.retries += 1;
+    updateUI(ctx);
+    ctx.ui.notify("External-evidence gate triggered — forcing an evidence-backed revision pass.", "warning");
+
+    pi.sendUserMessage(
+      [
+        {
+          type: "text",
+          text: [
+            "SYSTEM ENFORCEMENT: The previous /explore output is not accepted yet.",
+            "It did not show enough external evidence usage and/or explicit URL citations.",
+            "",
+            "Before revising, you MUST:",
+            "1. Call harness_explore_subagents to run the isolated OPT/PRA/SKP subagents if you have not already.",
+            "2. Use harness_web_search for focused external queries when you need additional evidence beyond the subagent pass.",
+            "3. Use harness_web_fetch on relevant URLs before relying on them in the synthesis.",
+            "4. Revise the debate so every external claim cites explicit source URLs.",
+            "5. Mark unsupported claims as [UNVERIFIED] or strike them from the synthesis.",
+            "6. Keep local codebase claims tied to file paths; keep external claims tied to URLs.",
+            "",
+            "Return only the revised exploration update.",
+          ].join("\n"),
+        },
+      ],
+      { deliverAs: "followUp" },
+    );
+  });
+
+  // ── Tool enforcement ──────────────────────────────────────────────
+
+  pi.on("tool_call", async (event) => {
+    if (IS_SUBAGENT_CHILD) {
+      if ((event.toolName === "write" || event.toolName === "edit") && CHILD_SUBAGENT_ROLE !== "IMP") {
         return {
           block: true,
-          reason: `🔴 BLOCKED: This bash command appears to mutate state ("${event.input.command.slice(0, 60)}..."). Explore mode only allows read-only commands (ls, grep, find, git log, cargo search, etc.). Use /execute to switch to implementation mode.`,
+          reason: `🔴 BLOCKED: ${CHILD_SUBAGENT_ROLE || "This child subagent"} cannot mutate files.`,
+        };
+      }
+
+      if (isToolCallEventType("bash", event)) {
+        const classification = classifyChildBashCommand(CHILD_SUBAGENT_BASH_POLICY, event.input.command);
+        if (!classification.allowed) {
+          return {
+            block: true,
+            reason: `🔴 BLOCKED: ${classification.reason}`,
+          };
+        }
+      }
+
+      return;
+    }
+
+    if (state.mode === "explore") {
+      if (event.toolName === "write" || event.toolName === "edit") {
+        return {
+          block: true,
+          reason: `🔴 BLOCKED: \"${event.toolName}\" is not allowed in explore mode. Explore mode is read-only — no code modifications. Use /execute to switch to implementation mode.`,
+        };
+      }
+
+      if (isToolCallEventType("bash", event)) {
+        const classification = classifyExploreBash(event.input.command);
+        if (!classification.allowed) {
+          return {
+            block: true,
+            reason: `🔴 BLOCKED: ${classification.reason}`,
+          };
+        }
+      }
+
+      return;
+    }
+
+    if (state.mode === "execute") {
+      if (event.toolName === "write" || event.toolName === "edit") {
+        return {
+          block: true,
+          reason: `🔴 BLOCKED: Main execute mode is orchestration-only. Delegate implementation to harness_execute_subagents with the IMP role.`,
+        };
+      }
+
+      if (isToolCallEventType("bash", event)) {
+        return {
+          block: true,
+          reason: "🔴 BLOCKED: Main execute mode is orchestration-only. Delegate build/test/check commands to harness_execute_subagents with the VER role.",
         };
       }
     }
@@ -235,7 +1483,7 @@ export default function (pi: ExtensionAPI) {
 
   // ── System prompt injection ───────────────────────────────────────
 
-  pi.on("before_agent_start", async (event, _ctx) => {
+  pi.on("before_agent_start", async (event) => {
     if (state.mode === "off") return;
 
     let injection = "";
@@ -248,12 +1496,24 @@ You are operating in divergent thinking mode with 3-persona debate.
 - 🟡 PRA (Pragmatist): Ground in what ships
 - 🟢 SKP (Skeptic): Find what breaks
 Rules: No unanimous agreement in Round 1. Evidence required from Round 2. Unsupported claims struck in Round 3.
-Write/edit/build tools are BLOCKED. Read-only research only.
+Local file mutation is BLOCKED.
+Structured external-evidence tools are active:
+- harness_explore_subagents: REQUIRED isolated OPT/PRA/SKP subagent pass before final synthesis.
+- harness_web_search: discover ecosystem, prior-art, benchmark, and failure-mode sources.
+- harness_web_fetch: inspect source pages and cite exact URLs before relying on them.
+External-evidence policy:
+- Codebase-local claims may cite repository files.
+- Ecosystem, library, market, benchmark, standards, prior-art, and failure-mode claims MUST be backed by external URLs.
+- Search snippets alone are not enough for key claims; fetch the strongest sources.
+- Raw network bash (curl/wget/etc.) is BLOCKED so provenance stays auditable.
+- Before producing a final /explore synthesis, you MUST call harness_explore_subagents at least once.
+- A synthesis is not acceptable unless it cites explicit source URLs or marks a claim [UNVERIFIED].
+Evidence collected this session so far: ${exploreTotals.subagentRuns} subagent rounds, ${exploreTotals.searches} searches, ${exploreTotals.fetches} fetches, ${exploreTotals.sources.size} unique URLs.
 `;
     }
 
     if (state.mode === "execute") {
-      const passed = state.acStatuses.filter(a => a.status === "pass").length;
+      const passed = state.acStatuses.filter((a) => a.status === "pass").length;
       const total = state.acStatuses.length;
 
       injection = `
@@ -263,12 +1523,15 @@ You are operating in convergent execution mode with 3-role mutual verification.
 - 🔨 IMP (Implementer): Writes code. Cannot mark ACs passed.
 - ✅ VER (Verifier): Sole authority on AC pass/fail. Cannot write code.
 Iron law: No role evaluates its own output.
+This parent execute agent is an ORCHESTRATOR. Direct write/edit/bash implementation is blocked here.
+Use harness_execute_subagents to invoke real isolated PLN / IMP / VER subprocess agents.
 AC Status: ${passed}/${total} passed. Regressions: ${state.regressionCount}. Commits: ${state.commitCount}.
 ${state.currentIncrement ? `Current increment: ${state.currentIncrement}` : ""}
 VERIFICATION REGISTRY: VER must maintain a cumulative Verification Registry (.harness/verification-registry.json).
 - After confirming an AC passes, VER MUST call harness_verify_register to record the verification method.
 - Before regression checks, VER MUST call harness_verify_list and re-run every registered verification.
 - A passing AC without a registered verification is a gap that PLN should challenge.
+- Planning, implementation, and verification work should be delegated to harness_execute_subagents rather than role-played in the parent context.
 After VER confirms all gates pass and no regressions for an increment, VER MUST call the harness_commit tool to commit and push the changes before proceeding to the next increment.
 `;
     }
@@ -280,49 +1543,307 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
     }
   });
 
-  // ── UI updates ────────────────────────────────────────────────────
+  // ── Web research tools ────────────────────────────────────────────
 
-  function updateUI(ctx: ExtensionContext) {
-    if (!ctx.hasUI) return;
+  pi.registerTool({
+    name: "harness_web_search",
+    label: "Harness Web Search",
+    description: "Search the public web for external sources. Use this in explore mode to gather ecosystem, prior-art, benchmark, or failure-mode evidence before making claims.",
+    promptSnippet: "Search the public web for external evidence and candidate sources.",
+    promptGuidelines: [
+      "Use harness_web_search in explore mode before making ecosystem or prior-art claims.",
+      "Prefer multiple focused queries over one broad query.",
+      "After finding promising results, call harness_web_fetch on the strongest URLs before relying on them in the synthesis.",
+    ],
+    parameters: Type.Object({
+      query: Type.String({ description: "Search query" }),
+      max_results: Type.Optional(Type.Number({ description: "Maximum results to return (default 5, max 10)" })),
+      backend: Type.Optional(Type.String({ description: "Optional search backend override: duckduckgo, searxng, or tavily" })),
+    }),
+    async execute(_toolCallId, params, signal) {
+      const backend = getSearchBackend(params.backend);
+      const maxResults = Math.max(1, Math.min(10, Math.floor(params.max_results ?? 5)));
+      const { results } = await runWebSearch(params.query, maxResults, backend, signal);
 
-    if (state.mode === "explore") {
-      ctx.ui.setStatus("harness", "🧠 EXPLORE");
+      const lines: string[] = [];
+      lines.push(`Web search for: ${params.query}`);
+      lines.push(`Backend: ${backend}`);
+      lines.push("");
 
-      const round = state.debateRound ?? 0;
-      const lines = [
-        "🧠 Explore Mode — 3-Persona Debate",
-        `Round: ${round}/3  |  🔴 OPT  🟡 PRA  🟢 SKP`,
-        "Tools: read-only (write/edit/build blocked)",
-      ];
-      ctx.ui.setWidget("harness", lines);
-    }
+      results.forEach((result, index) => {
+        lines.push(`${index + 1}. ${result.title}`);
+        lines.push(`   URL: ${result.url}`);
+        if (result.snippet) lines.push(`   Snippet: ${result.snippet}`);
+        lines.push("");
+      });
 
-    if (state.mode === "execute") {
-      const passed = state.acStatuses.filter(a => a.status === "pass").length;
-      const failed = state.acStatuses.filter(a => a.status === "fail").length;
-      const pending = state.acStatuses.filter(a => a.status === "pending").length;
+      lines.push("Use harness_web_fetch on the most relevant URLs before treating their claims as accepted evidence.");
 
-      ctx.ui.setStatus(
-        "harness",
-        `⚙️ EXECUTE ✅${passed} ❌${failed} ⏳${pending} 📦${state.commitCount}`,
-      );
+      return {
+        content: [{ type: "text", text: lines.join("\n") }],
+        details: {
+          backend,
+          query: params.query,
+          results,
+        },
+      };
+    },
+  });
 
-      const lines = [
-        "⚙️ Execute Mode — 3-Role Verification",
-        `📋 PLN → 🔨 IMP → ✅ VER → 📦 Commit`,
-        `ACs: ✅ ${passed} | ❌ ${failed} | ⏳ ${pending} | Regressions: ${state.regressionCount} | Commits: ${state.commitCount}`,
-      ];
-      if (state.currentIncrement) {
-        lines.push(`Current: ${state.currentIncrement}`);
+  pi.registerTool({
+    name: "harness_web_fetch",
+    label: "Harness Web Fetch",
+    description: "Fetch a public URL and extract readable text so external claims can be grounded in the actual source content.",
+    promptSnippet: "Fetch and inspect a source URL before accepting its claims as evidence.",
+    promptGuidelines: [
+      "Use harness_web_fetch after harness_web_search for the URLs you intend to cite.",
+      "Cite the fetched URL explicitly in the final explore output.",
+      "Do not rely on snippets alone for major conclusions when the original page is fetchable.",
+    ],
+    parameters: Type.Object({
+      url: Type.String({ description: "http(s) URL to fetch" }),
+      max_chars: Type.Optional(Type.Number({ description: "Maximum characters of extracted text to return (default 12000, max 30000)" })),
+    }),
+    async execute(_toolCallId, params, signal) {
+      const url = ensureHttpUrl(params.url);
+      const maxChars = Math.max(500, Math.min(30_000, Math.floor(params.max_chars ?? 12_000)));
+
+      const response = await fetch(url, {
+        headers: {
+          "user-agent": "Mozilla/5.0 (compatible; harness-web-fetch/1.0)",
+          accept: "text/html,application/xhtml+xml,application/json,text/plain;q=0.9,*/*;q=0.8",
+        },
+        redirect: "follow",
+        signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Fetch failed: ${response.status} ${response.statusText}`);
       }
-      ctx.ui.setWidget("harness", lines);
-    }
 
-    if (state.mode === "off") {
-      ctx.ui.setStatus("harness", undefined);
-      ctx.ui.setWidget("harness", undefined);
-    }
-  }
+      const contentType = response.headers.get("content-type") ?? "unknown";
+      const rawText = await response.text();
+      const title = contentType.includes("html") ? extractTitleFromHtml(rawText) : undefined;
+      const extracted = contentType.includes("html")
+        ? htmlToText(rawText)
+        : contentType.includes("json")
+          ? JSON.stringify(JSON.parse(rawText), null, 2)
+          : rawText;
+      const truncated = extracted.length > maxChars;
+      const body = extracted.slice(0, maxChars);
+
+      const lines: string[] = [];
+      lines.push(title ? `Title: ${title}` : `URL: ${response.url}`);
+      if (title) lines.push(`URL: ${response.url}`);
+      lines.push(`Status: ${response.status}`);
+      lines.push(`Content-Type: ${contentType}`);
+      lines.push("");
+      lines.push(body || "[No extractable body text]");
+      if (truncated) {
+        lines.push("");
+        lines.push(`[TRUNCATED to ${maxChars} chars]`);
+      }
+
+      return {
+        content: [{ type: "text", text: lines.join("\n") }],
+        details: {
+          requestedUrl: url.toString(),
+          finalUrl: response.url,
+          status: response.status,
+          contentType,
+          title,
+          truncated,
+          extractedChars: extracted.length,
+        },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "harness_explore_subagents",
+    label: "Explore Subagents",
+    description: "Run isolated OPT/PRA/SKP explore subagents in parallel using separate pi subprocesses. Use this in explore mode before synthesis so each persona gathers its own evidence-backed position.",
+    promptSnippet: "Run isolated OPT/PRA/SKP subagents for explore mode and return their evidence-backed positions.",
+    promptGuidelines: [
+      "Call harness_explore_subagents in explore mode before writing the final debate synthesis.",
+      "Pass a concise topic and optional project context summary so each subagent can research independently.",
+      "Use the returned citations directly in the final debate transcript and synthesis.",
+    ],
+    parameters: Type.Object({
+      topic: Type.String({ description: "Exploration topic or decision question" }),
+      project_context: Type.Optional(Type.String({ description: "Optional codebase/project context summary for the subagents" })),
+    }),
+    async execute(_toolCallId, params, signal, onUpdate, ctx) {
+      if (state.mode !== "explore") {
+        throw new Error("harness_explore_subagents is only available in explore mode. Use /explore first.");
+      }
+
+      const modelSpec = modelToCliSpec(ctx.model as { provider?: string; id?: string } | undefined);
+      const thinkingLevel = pi.getThinkingLevel();
+      const orderedResults: Array<ExploreSubagentResult | undefined> = new Array(EXPLORE_SUBAGENT_ROLES.length).fill(undefined);
+
+      const specs: HarnessSubagentSpec<ExplorePersona>[] = EXPLORE_SUBAGENT_ROLES.map((role) => ({
+        mode: "explore",
+        role: role.persona,
+        label: `${role.icon} ${role.label}`,
+        task: buildExploreSubagentTask(role, params.topic, params.project_context),
+        systemPrompt: buildExploreSubagentSystemPrompt(role),
+        cwd: ctx.cwd,
+        activeTools: ["read", "grep", "find", "ls", "harness_web_search", "harness_web_fetch"],
+        bashPolicy: "read-only",
+        extensionPath: CURRENT_EXTENSION_PATH,
+        modelSpec,
+        thinkingLevel,
+        signal,
+      }));
+
+      const results = await runHarnessSubagentBatch(specs, {
+        mode: "parallel",
+        onProgress: (batchResults, completed, total) => {
+          for (const result of batchResults) {
+            const index = EXPLORE_SUBAGENT_ROLES.findIndex((role) => role.persona === result.role);
+            if (index >= 0) orderedResults[index] = mapExploreRunResult(params.topic, result);
+          }
+
+          const details: ExploreSubagentToolDetails = {
+            topic: params.topic,
+            completed,
+            total,
+            results: orderedResults.filter((result): result is ExploreSubagentResult => Boolean(result)),
+          };
+          onUpdate?.({
+            content: [{ type: "text", text: summarizeExploreSubagentProgress(details) }],
+            details,
+          });
+        },
+      });
+
+      for (const result of results) {
+        const index = EXPLORE_SUBAGENT_ROLES.findIndex((role) => role.persona === result.role);
+        if (index >= 0) orderedResults[index] = mapExploreRunResult(params.topic, result);
+      }
+
+      const details: ExploreSubagentToolDetails = {
+        topic: params.topic,
+        completed: results.length,
+        total: EXPLORE_SUBAGENT_ROLES.length,
+        results: orderedResults.filter((result): result is ExploreSubagentResult => Boolean(result)),
+      };
+
+      return {
+        content: [{ type: "text", text: formatExploreSubagentResults(details) }],
+        details,
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "harness_execute_subagents",
+    label: "Execute Subagents",
+    description: "Run isolated PLN / IMP / VER execute subagents using separate pi subprocesses. Use this in execute mode instead of role-playing the three roles inside the parent agent.",
+    promptSnippet: "Run isolated execute subagents (PLN / IMP / VER) and return their role-specific outputs.",
+    promptGuidelines: [
+      "Use harness_execute_subagents in execute mode for planning, implementation, and verification work.",
+      "Default to sequential mode so each role can react to prior role outputs.",
+      "Reserve registry updates and harness_commit for the parent execute agent after VER's evidence is in.",
+    ],
+    parameters: Type.Object({
+      objective: Type.String({ description: "The concrete execute objective, e.g. 'Plan increments for criteria X' or 'Implement and verify INC-2'" }),
+      roles: Type.Optional(Type.Array(Type.String(), { description: "Subset/order of roles to run, e.g. ['PLN','IMP','VER']" })),
+      mode: Type.Optional(Type.String({ description: "Execution mode: 'sequential' (default) or 'parallel'" })),
+      context: Type.Optional(Type.String({ description: "Optional additional context for the role subagents" })),
+    }),
+    async execute(_toolCallId, params, signal, onUpdate, ctx) {
+      if (state.mode !== "execute") {
+        throw new Error("harness_execute_subagents is only available in execute mode. Use /execute first.");
+      }
+
+      const requestedRoles = (params.roles ?? ["PLN", "IMP", "VER"])
+        .map((role) => role.trim().toUpperCase())
+        .filter(Boolean);
+      const invalidRole = requestedRoles.find((role) => !["PLN", "IMP", "VER"].includes(role));
+      if (invalidRole) {
+        throw new Error(`Invalid execute role: ${invalidRole}. Expected PLN, IMP, or VER.`);
+      }
+
+      const roles = requestedRoles as ExecuteRole[];
+      const mode = (params.mode?.trim().toLowerCase() === "parallel" ? "parallel" : "sequential") as "parallel" | "sequential";
+      const modelSpec = modelToCliSpec(ctx.model as { provider?: string; id?: string } | undefined);
+      const thinkingLevel = pi.getThinkingLevel();
+      const orderedResults: Array<ExecuteSubagentResult | undefined> = new Array(roles.length).fill(undefined);
+
+      const specs: HarnessSubagentSpec<ExecuteRole>[] = roles.map((role) => {
+        const spec = resolveExecuteRole(role);
+        return {
+          mode: "execute",
+          role: spec.role,
+          label: `${spec.icon} ${spec.label}`,
+          task: buildExecuteRoleTask(spec, params.objective, params.context),
+          systemPrompt: buildExecuteRoleSystemPrompt(spec),
+          cwd: ctx.cwd,
+          activeTools: spec.activeTools,
+          bashPolicy: spec.bashPolicy,
+          extensionPath: CURRENT_EXTENSION_PATH,
+          modelSpec,
+          thinkingLevel,
+          signal,
+        };
+      });
+
+      const results = await runHarnessSubagentBatch(specs, {
+        mode,
+        taskResolver: mode === "sequential"
+          ? (spec, previousResults) => {
+              if (previousResults.length === 0) return spec.task;
+              return [
+                spec.task,
+                "",
+                "Context from prior role outputs:",
+                formatPriorSubagentOutputs(previousResults),
+              ].join("\n");
+            }
+          : undefined,
+        onProgress: (batchResults, completed, total) => {
+          for (const result of batchResults) {
+            const index = roles.findIndex((role) => role === result.role);
+            if (index >= 0) orderedResults[index] = mapExecuteRunResult(params.objective, result);
+          }
+
+          const details: ExecuteSubagentToolDetails = {
+            objective: params.objective,
+            mode,
+            completed,
+            total,
+            roles,
+            results: orderedResults.filter((result): result is ExecuteSubagentResult => Boolean(result)),
+          };
+          onUpdate?.({
+            content: [{ type: "text", text: summarizeExecuteSubagentProgress(details) }],
+            details,
+          });
+        },
+      });
+
+      for (const result of results) {
+        const index = roles.findIndex((role) => role === result.role);
+        if (index >= 0) orderedResults[index] = mapExecuteRunResult(params.objective, result);
+      }
+
+      const details: ExecuteSubagentToolDetails = {
+        objective: params.objective,
+        mode,
+        completed: results.length,
+        total: roles.length,
+        roles,
+        results: orderedResults.filter((result): result is ExecuteSubagentResult => Boolean(result)),
+      };
+
+      return {
+        content: [{ type: "text", text: formatExecuteSubagentResults(details) }],
+        details,
+      };
+    },
+  });
 
   // ── Verification Registry tools ───────────────────────────────────
 
@@ -352,8 +1873,8 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
       }
 
       const registry = await readRegistry(ctx.cwd);
-
       const isUpdate = params.ac_id in registry.entries;
+
       registry.entries[params.ac_id] = {
         requirement: params.requirement,
         source: params.source,
@@ -441,7 +1962,7 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
       return {
         content: [{ type: "text", text: lines.join("\n") }],
         details: {
-          entries: entries.map(([id, e]) => ({ id, ...e })),
+          entries: entries.map(([id, entry]) => ({ id, ...entry })),
           totalEntries: Object.keys(registry.entries).length,
         },
       };
@@ -470,15 +1991,14 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
 
       onUpdate?.({
         content: [{ type: "text", text: `Staging changes for ${params.increment}...` }],
+        details: { stage: "staging", increment: params.increment },
       });
 
-      // Stage all changes
       const addResult = await pi.exec("git", ["add", "-A"], { signal, timeout: 10_000 });
       if (addResult.code !== 0) {
         throw new Error(`git add failed: ${addResult.stderr}`);
       }
 
-      // Check if there are staged changes
       const diffResult = await pi.exec("git", ["diff", "--cached", "--quiet"], { signal, timeout: 10_000 });
       if (diffResult.code === 0) {
         return {
@@ -487,10 +2007,10 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
         };
       }
 
-      // Commit
       const commitMsg = `${params.increment}: ${params.message}`;
       onUpdate?.({
         content: [{ type: "text", text: `Committing: ${commitMsg}` }],
+        details: { stage: "committing", increment: params.increment, message: commitMsg },
       });
 
       const commitResult = await pi.exec("git", ["commit", "-m", commitMsg], { signal, timeout: 15_000 });
@@ -498,20 +2018,18 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
         throw new Error(`git commit failed: ${commitResult.stderr}`);
       }
 
-      // Get commit hash
       const hashResult = await pi.exec("git", ["rev-parse", "--short", "HEAD"], { signal, timeout: 5_000 });
       const hash = hashResult.stdout.trim();
 
-      // Push
       onUpdate?.({
         content: [{ type: "text", text: `Pushing ${hash}...` }],
+        details: { stage: "pushing", increment: params.increment, hash },
       });
 
       const pushResult = await pi.exec("git", ["push"], { signal, timeout: 30_000 });
       const pushed = pushResult.code === 0;
 
-      // Update state
-      state.commitCount++;
+      state.commitCount += 1;
       state.currentIncrement = params.increment;
       saveState();
       updateUI(ctx);
@@ -522,7 +2040,7 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
       const icon = pushed ? "✅" : "⚠️";
       const summary = `${icon} ${params.increment} committed (${hash}) — ${pushStatus}`;
 
-      ctx.ui.notify(summary, pushed ? "success" : "warning");
+      ctx.ui.notify(summary, pushed ? "info" : "warning");
 
       return {
         content: [{ type: "text", text: summary }],
@@ -537,57 +2055,6 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
     },
   });
 
-  /*
-  pi.registerTool({
-    name: "harness_ac_update",
-    label: "Update AC Status",
-    description: "Update acceptance criteria status. Only VER role should call this in execute mode.",
-    parameters: Type.Object({
-      ac_id: Type.String({ description: "AC identifier, e.g. 'AC-1.1'" }),
-      status: StringEnum(["pass", "fail", "pending"] as const),
-      evidence: Type.Optional(Type.String({ description: "Evidence for pass/fail" })),
-      increment: Type.Optional(Type.String({ description: "Which increment, e.g. 'INC-3'" })),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      if (state.mode !== "execute") {
-        throw new Error("AC tracking is only available in execute mode. Use /execute first.");
-      }
-
-      const existing = state.acStatuses.find(a => a.id === params.ac_id);
-      if (existing) {
-        // Regression detection
-        if (existing.status === "pass" && params.status === "fail") {
-          state.regressionCount++;
-        }
-        existing.status = params.status;
-        existing.evidence = params.evidence;
-        existing.verifiedAfter = params.increment;
-      } else {
-        state.acStatuses.push({
-          id: params.ac_id,
-          status: params.status,
-          evidence: params.evidence,
-          verifiedAfter: params.increment,
-        });
-      }
-
-      saveState();
-      updateUI(ctx);
-
-      const passed = state.acStatuses.filter(a => a.status === "pass").length;
-      const total = state.acStatuses.length;
-
-      return {
-        content: [{
-          type: "text",
-          text: `AC ${params.ac_id}: ${params.status}. Total: ${passed}/${total} passed.`,
-        }],
-        details: { acStatuses: state.acStatuses },
-      };
-    },
-  });
-  */
-
   // ── Keyboard shortcut ─────────────────────────────────────────────
 
   pi.registerShortcut("ctrl+shift+h", {
@@ -598,6 +2065,10 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
       const next = cycle[(idx + 1) % cycle.length];
       state.mode = next;
       saveState();
+      if (next === "explore") resetExploreTracking();
+      if (next === "execute") resetExecuteTracking();
+      if (next !== "explore") endExploreEvidenceChain();
+      setModeTools(next);
       updateUI(ctx);
       ctx.ui.notify(`Harness: ${next === "off" ? "disabled" : next}`, "info");
     },
