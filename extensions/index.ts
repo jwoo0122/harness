@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { isToolCallEventType } from "@mariozechner/pi-coding-agent";
+import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -174,6 +175,14 @@ const SAFE_SUBAGENT_CHILD_TOOL_NAMES = new Set([
   "harness_web_search",
   "harness_web_fetch",
 ]);
+const MAX_SUBAGENT_CALL_PREVIEW_CHARS = 96;
+const MAX_SUBAGENT_ACTIVITY_CHARS = 72;
+const MAX_SUBAGENT_INVOCATION_CHARS = 240;
+const MAX_SUBAGENT_OUTPUT_PREVIEW_LINES = 8;
+const MAX_SUBAGENT_OUTPUT_LINE_CHARS = 120;
+const MAX_SUBAGENT_STDERR_PREVIEW_CHARS = 200;
+const MAX_SUBAGENT_RECENT_STREAM_RENDER_ITEMS = 8;
+const MAX_SUBAGENT_CITATIONS_RENDER = 4;
 
 const EXPLORE_SUBAGENT_ROLES: Array<{
   persona: ExplorePersona;
@@ -720,6 +729,397 @@ function formatExecuteSubagentResults(details: ExecuteSubagentToolDetails): stri
   }
 
   lines.push("Use these isolated role outputs as the authoritative PLN / IMP / VER perspectives for the current execute step.");
+  return lines.join("\n");
+}
+
+function summarizeSubagentText(text: string | undefined, maxChars: number): string {
+  const normalized = (text ?? "").replace(/\s+/g, " ").trim();
+  if (!normalized) return "";
+  if (normalized.length <= maxChars) return normalized;
+  return `${normalized.slice(0, maxChars - 1)}…`;
+}
+
+function quoteCliArg(arg: string): string {
+  if (!arg) return '""';
+  if (/[\s"'\\]/.test(arg)) return JSON.stringify(arg);
+  return arg;
+}
+
+function formatSubagentPid(pid: number | undefined): string {
+  return pid ? `pid ${pid}` : "pid —";
+}
+
+function getSubagentPhase(snapshot: HarnessSubagentSnapshot | undefined, result?: HarnessSubagentRunResult): string {
+  if (result) return result.exitCode === 0 ? "done" : `exit ${result.exitCode}`;
+  switch (snapshot?.livePhase) {
+    case "starting":
+      return "starting";
+    case "running":
+      return "thinking";
+    case "tool_running":
+      return "tool";
+    case "completed":
+      return "done";
+    case "failed":
+      return "failed";
+    default:
+      return "queued";
+  }
+}
+
+function getSubagentPhaseTone(snapshot: HarnessSubagentSnapshot | undefined, result?: HarnessSubagentRunResult): string {
+  if ((result && result.exitCode !== 0) || snapshot?.livePhase === "failed") return "error";
+  if (result || snapshot?.livePhase === "completed") return "success";
+  if (snapshot?.livePhase === "running" || snapshot?.livePhase === "tool_running") return "warning";
+  return "muted";
+}
+
+function lastSubagentStreamItem(
+  items: HarnessSubagentSnapshot["recentStream"],
+): HarnessSubagentSnapshot["recentStream"][number] | undefined {
+  return items.length > 0 ? items[items.length - 1] : undefined;
+}
+
+function findLastSubagentStreamItem(
+  items: HarnessSubagentSnapshot["recentStream"],
+  predicate: (item: HarnessSubagentSnapshot["recentStream"][number]) => boolean,
+): HarnessSubagentSnapshot["recentStream"][number] | undefined {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (predicate(item)) return item;
+  }
+  return undefined;
+}
+
+function formatSubagentToolActivity(
+  toolName: string | undefined,
+  detail: string | undefined,
+  maxChars = MAX_SUBAGENT_ACTIVITY_CHARS,
+): string {
+  const toolLabel = toolName ? formatLiveToolName(toolName) : "tool";
+  const detailLabel = summarizeSubagentText(detail, maxChars);
+  return detailLabel ? `${toolLabel} ${detailLabel}` : toolLabel;
+}
+
+function describeSubagentLiveActivity(snapshot: HarnessSubagentSnapshot | undefined): string {
+  if (!snapshot) return "waiting";
+
+  if (snapshot.livePhase === "tool_running") {
+    const liveToolItem = findLastSubagentStreamItem(
+      snapshot.recentStream,
+      (item) => item.type === "tool_execution_start" && item.toolName === snapshot.currentToolName,
+    );
+    return formatSubagentToolActivity(snapshot.currentToolName, liveToolItem?.text);
+  }
+
+  const lastAssistant = findLastSubagentStreamItem(
+    snapshot.recentStream,
+    (item) => item.type === "assistant_text" && Boolean(item.text),
+  );
+  const assistantPreview = summarizeSubagentText(lastAssistant?.text ?? snapshot.assistantPreview, MAX_SUBAGENT_ACTIVITY_CHARS);
+  if (assistantPreview) return assistantPreview;
+
+  const lastItem = lastSubagentStreamItem(snapshot.recentStream);
+  if (lastItem?.type === "tool_execution_end") {
+    return `${formatLiveToolName(lastItem.toolName ?? "tool")} ${lastItem.isError ? "failed" : "done"}`;
+  }
+
+  if (snapshot.livePhase === "starting") return "booting";
+  if (snapshot.livePhase === "running") return "awaiting output";
+  return "idle";
+}
+
+function formatSubagentToolCounts(toolCalls: Record<string, number>, maxItems = Number.MAX_SAFE_INTEGER): string {
+  const entries = Object.entries(toolCalls)
+    .filter(([, count]) => count > 0)
+    .sort(([left], [right]) => left.localeCompare(right));
+
+  if (entries.length === 0) return "";
+
+  const visible = entries
+    .slice(0, maxItems)
+    .map(([tool, count]) => `${formatLiveToolName(tool)}×${count}`)
+    .join(", ");
+  const hidden = entries.length - Math.min(entries.length, maxItems);
+  return hidden > 0 ? `${visible} +${hidden} more` : visible;
+}
+
+function formatSubagentCitationPreview(citations: string[]): string {
+  const ordered = [...uniqueUrls(citations)].sort((left, right) => left.localeCompare(right));
+  if (ordered.length === 0) return "none";
+  const visible = ordered.slice(0, MAX_SUBAGENT_CITATIONS_RENDER).join(", ");
+  const hidden = ordered.length - Math.min(ordered.length, MAX_SUBAGENT_CITATIONS_RENDER);
+  return hidden > 0 ? `${visible} +${hidden} more` : visible;
+}
+
+function summarizeExploreCollapsedActivity(
+  snapshot: HarnessSubagentSnapshot<ExplorePersona> | undefined,
+  result: ExploreSubagentResult | undefined,
+): string {
+  if (!result) return describeSubagentLiveActivity(snapshot);
+  if (snapshot && ["starting", "running", "tool_running"].includes(snapshot.livePhase)) {
+    return describeSubagentLiveActivity(snapshot);
+  }
+
+  if (result.exitCode !== 0) {
+    const stderrPreview = summarizeSubagentText(result.stderr, MAX_SUBAGENT_ACTIVITY_CHARS);
+    if (stderrPreview) return `stderr ${stderrPreview}`;
+  }
+
+  return `🔎${result.searches} 🌐${result.fetches} 🔗${result.citations.length}`;
+}
+
+function summarizeExecuteCollapsedActivity(
+  snapshot: HarnessSubagentSnapshot<ExecuteRole> | undefined,
+  result: ExecuteSubagentResult | undefined,
+): string {
+  if (!result) return describeSubagentLiveActivity(snapshot);
+  if (snapshot && ["starting", "running", "tool_running"].includes(snapshot.livePhase)) {
+    return describeSubagentLiveActivity(snapshot);
+  }
+
+  if (result.exitCode !== 0) {
+    const stderrPreview = summarizeSubagentText(result.stderr, MAX_SUBAGENT_ACTIVITY_CHARS);
+    if (stderrPreview) return `stderr ${stderrPreview}`;
+  }
+
+  const toolSummary = formatSubagentToolCounts(result.toolCalls, 3);
+  if (toolSummary) return toolSummary;
+
+  return summarizeSubagentText(result.output || snapshot?.assistantPreview, MAX_SUBAGENT_ACTIVITY_CHARS) || "no output";
+}
+
+function extractSubagentIsolationFlags(args: string[]): string[] {
+  const flags: string[] = [];
+  if (args.includes("--no-session")) flags.push("--no-session");
+  if (args.includes("--no-extensions")) flags.push("--no-extensions");
+  if (args.includes("--no-skills")) flags.push("--no-skills");
+  if (args.includes("--no-prompt-templates")) flags.push("--no-prompt-templates");
+
+  const toolsIndex = args.indexOf("--tools");
+  if (toolsIndex >= 0 && typeof args[toolsIndex + 1] === "string") {
+    flags.push(`tools=${args[toolsIndex + 1]}`);
+  } else if (args.includes("--no-tools")) {
+    flags.push("--no-tools");
+  }
+
+  return flags;
+}
+
+function summarizeSubagentInvocation(provenance: HarnessSubagentSnapshot["provenance"]): string {
+  const renderedArgs: string[] = [];
+
+  for (let index = 0; index < provenance.args.length; index += 1) {
+    const arg = provenance.args[index];
+
+    if (arg === "--append-system-prompt") {
+      renderedArgs.push("--append-system-prompt", "[omitted]");
+      index += 1;
+      continue;
+    }
+
+    if (["--mode", "-e", "--tools", "--model", "--thinking"].includes(arg)) {
+      const value = provenance.args[index + 1];
+      if (typeof value === "string") {
+        renderedArgs.push(arg, quoteCliArg(summarizeSubagentText(value, 80) || value));
+        index += 1;
+        continue;
+      }
+    }
+
+    if (arg.startsWith("-")) {
+      renderedArgs.push(arg);
+      continue;
+    }
+
+    renderedArgs.push("[task omitted]");
+    break;
+  }
+
+  return summarizeSubagentText([quoteCliArg(provenance.command), ...renderedArgs].join(" "), MAX_SUBAGENT_INVOCATION_CHARS);
+}
+
+function formatSubagentStreamTimestamp(value: string | undefined): string {
+  if (!value) return "--:--:--";
+  return value.length >= 19 ? value.slice(11, 19) : value;
+}
+
+function renderSubagentRecentStreamLines(
+  snapshot: HarnessSubagentSnapshot | HarnessSubagentRunResult | undefined,
+  theme: { fg: (token: string, text: string) => string },
+): string[] {
+  const items = snapshot?.recentStream ?? [];
+  if (items.length === 0) {
+    return [theme.fg("muted", "    (no recent stream items captured)")];
+  }
+
+  const startIndex = Math.max(0, items.length - MAX_SUBAGENT_RECENT_STREAM_RENDER_ITEMS);
+  const lines: string[] = [];
+  if (startIndex > 0) {
+    lines.push(theme.fg("muted", `    … ${startIndex} earlier items`));
+  }
+
+  for (const item of items.slice(startIndex)) {
+    const at = formatSubagentStreamTimestamp(item.at);
+    if (item.type === "assistant_text") {
+      lines.push(`${theme.fg("dim", `    [${at}]`)} ${theme.fg("toolOutput", `✎ ${summarizeSubagentText(item.text, MAX_SUBAGENT_OUTPUT_LINE_CHARS) || "…"}`)}`);
+      continue;
+    }
+
+    if (item.type === "tool_execution_start") {
+      lines.push(`${theme.fg("dim", `    [${at}]`)} ${theme.fg("accent", `→ ${formatSubagentToolActivity(item.toolName, item.text, MAX_SUBAGENT_OUTPUT_LINE_CHARS)}`)}`);
+      continue;
+    }
+
+    lines.push(`${theme.fg("dim", `    [${at}]`)} ${theme.fg(item.isError ? "error" : "success", `${item.isError ? "✗" : "✓"} ${formatLiveToolName(item.toolName ?? "tool")}`)}`);
+  }
+
+  return lines;
+}
+
+function renderSubagentPreviewLines(
+  text: string | undefined,
+  theme: { fg: (token: string, text: string) => string },
+): string[] {
+  const normalized = (text ?? "").trim();
+  if (!normalized) return [theme.fg("muted", "    (none)")];
+
+  const sourceLines = normalized.split("\n");
+  const visible = sourceLines
+    .slice(0, MAX_SUBAGENT_OUTPUT_PREVIEW_LINES)
+    .map((line) => theme.fg("toolOutput", `    ${summarizeSubagentText(line, MAX_SUBAGENT_OUTPUT_LINE_CHARS) || " "}`));
+  const hidden = sourceLines.length - Math.min(sourceLines.length, MAX_SUBAGENT_OUTPUT_PREVIEW_LINES);
+  if (hidden > 0) {
+    visible.push(theme.fg("muted", `    … +${hidden} more lines`));
+  }
+  return visible;
+}
+
+function renderExploreSubagentCollapsedText(
+  details: ExploreSubagentToolDetails,
+  theme: { fg: (token: string, text: string) => string; bold: (text: string) => string },
+): string {
+  return EXPLORE_SUBAGENT_ROLES.map((role) => {
+    const result = details.results.find((entry) => entry.persona === role.persona);
+    const snapshot = details.snapshots.find((entry) => entry.role === role.persona);
+    const source = snapshot ?? result;
+    const line = [
+      theme.fg("toolTitle", theme.bold(`${role.icon} ${role.persona}`)),
+      theme.fg("dim", formatSubagentPid(source?.provenance.pid)),
+      theme.fg(getSubagentPhaseTone(snapshot, result), getSubagentPhase(snapshot, result)),
+      theme.fg("toolOutput", summarizeExploreCollapsedActivity(snapshot, result)),
+    ].filter(Boolean);
+    return `${line[0]} ${theme.fg("muted", "·")} ${line.slice(1).join(` ${theme.fg("muted", "·")} `)}`;
+  }).join("\n");
+}
+
+function renderExecuteSubagentCollapsedText(
+  details: ExecuteSubagentToolDetails,
+  theme: { fg: (token: string, text: string) => string; bold: (text: string) => string },
+): string {
+  return details.roles.map((role) => {
+    const result = details.results.find((entry) => entry.role === role);
+    const snapshot = details.snapshots.find((entry) => entry.role === role);
+    const source = snapshot ?? result;
+    const line = [
+      theme.fg("toolTitle", theme.bold(`${resolveExecuteRole(role).icon} ${role}`)),
+      theme.fg("dim", formatSubagentPid(source?.provenance.pid)),
+      theme.fg(getSubagentPhaseTone(snapshot, result), getSubagentPhase(snapshot, result)),
+      theme.fg("toolOutput", summarizeExecuteCollapsedActivity(snapshot, result)),
+    ].filter(Boolean);
+    return `${line[0]} ${theme.fg("muted", "·")} ${line.slice(1).join(` ${theme.fg("muted", "·")} `)}`;
+  }).join("\n");
+}
+
+function renderExploreSubagentExpandedText(
+  details: ExploreSubagentToolDetails,
+  isPartial: boolean,
+  theme: { fg: (token: string, text: string) => string; bold: (text: string) => string },
+): string {
+  const lines: string[] = [];
+  lines.push(theme.fg("toolTitle", theme.bold(`Topic: ${details.topic}`)));
+  lines.push(theme.fg("muted", `${details.completed}/${details.total} personas complete${isPartial ? " · live" : ""}`));
+
+  for (const role of EXPLORE_SUBAGENT_ROLES) {
+    const result = details.results.find((entry) => entry.persona === role.persona);
+    const snapshot = details.snapshots.find((entry) => entry.role === role.persona);
+    const source = snapshot ?? result;
+    const phase = getSubagentPhase(snapshot, result);
+    const phaseTone = getSubagentPhaseTone(snapshot, result);
+    const toolSummary = result ? formatSubagentToolCounts(result.toolCalls) : "";
+    const isolationFlags = source ? extractSubagentIsolationFlags(source.provenance.args) : [];
+
+    lines.push("");
+    lines.push(theme.fg("toolTitle", theme.bold(`${role.icon} ${role.label} (${role.persona})`)));
+    lines.push(`  ${theme.fg("muted", "PID:")} ${theme.fg("dim", String(source?.provenance.pid ?? "—"))}`);
+    lines.push(`  ${theme.fg("muted", "Phase:")} ${theme.fg(phaseTone, phase)}${result ? theme.fg("dim", ` · exit ${result.exitCode}`) : ""}`);
+    if (source?.model) lines.push(`  ${theme.fg("muted", "Model:")} ${theme.fg("dim", source.model)}`);
+    if (source?.provenance.cwd) lines.push(`  ${theme.fg("muted", "CWD:")} ${theme.fg("dim", source.provenance.cwd)}`);
+    if (source) lines.push(`  ${theme.fg("muted", "Invocation:")} ${theme.fg("dim", summarizeSubagentInvocation(source.provenance))}`);
+    if (isolationFlags.length > 0) lines.push(`  ${theme.fg("muted", "Isolation:")} ${theme.fg("dim", isolationFlags.join(", "))}`);
+    if (source?.provenance.startedAt || source?.provenance.endedAt) {
+      lines.push(`  ${theme.fg("muted", "Lifetime:")} ${theme.fg("dim", `${source.provenance.startedAt ?? "?"} → ${source.provenance.endedAt ?? "running"}`)}`);
+    }
+    if (result) {
+      lines.push(`  ${theme.fg("muted", "Evidence:")} ${theme.fg("dim", `search×${result.searches}, fetch×${result.fetches}, citations×${result.citations.length}`)}`);
+      lines.push(`  ${theme.fg("muted", "Tools:")} ${theme.fg("dim", toolSummary || "none")}`);
+      lines.push(`  ${theme.fg("muted", "Citations:")} ${theme.fg("dim", formatSubagentCitationPreview(result.citations))}`);
+    }
+    lines.push(`  ${theme.fg("muted", "Recent stream:")}`);
+    lines.push(...renderSubagentRecentStreamLines(source, theme));
+    lines.push(`  ${theme.fg("muted", "Output preview:")}`);
+    lines.push(...renderSubagentPreviewLines(result?.output ?? source?.assistantPreview, theme));
+    if (result?.stderr.trim()) {
+      lines.push(`  ${theme.fg("muted", "stderr:")} ${theme.fg("error", summarizeSubagentText(result.stderr, MAX_SUBAGENT_STDERR_PREVIEW_CHARS))}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+function renderExecuteSubagentExpandedText(
+  details: ExecuteSubagentToolDetails,
+  isPartial: boolean,
+  theme: { fg: (token: string, text: string) => string; bold: (text: string) => string },
+): string {
+  const lines: string[] = [];
+  lines.push(theme.fg("toolTitle", theme.bold(`Objective: ${details.objective}`)));
+  lines.push(theme.fg("muted", `Mode: ${details.mode} · ${details.completed}/${details.total} roles complete${isPartial ? " · live" : ""}`));
+
+  for (const role of details.roles) {
+    const spec = resolveExecuteRole(role);
+    const result = details.results.find((entry) => entry.role === role);
+    const snapshot = details.snapshots.find((entry) => entry.role === role);
+    const source = snapshot ?? result;
+    const phase = getSubagentPhase(snapshot, result);
+    const phaseTone = getSubagentPhaseTone(snapshot, result);
+    const toolSummary = result ? formatSubagentToolCounts(result.toolCalls) : "";
+    const isolationFlags = source ? extractSubagentIsolationFlags(source.provenance.args) : [];
+
+    lines.push("");
+    lines.push(theme.fg("toolTitle", theme.bold(`${spec.icon} ${spec.label} (${role})`)));
+    lines.push(`  ${theme.fg("muted", "PID:")} ${theme.fg("dim", String(source?.provenance.pid ?? "—"))}`);
+    lines.push(`  ${theme.fg("muted", "Phase:")} ${theme.fg(phaseTone, phase)}${result ? theme.fg("dim", ` · exit ${result.exitCode}`) : ""}`);
+    if (source?.model) lines.push(`  ${theme.fg("muted", "Model:")} ${theme.fg("dim", source.model)}`);
+    if (source?.provenance.cwd) lines.push(`  ${theme.fg("muted", "CWD:")} ${theme.fg("dim", source.provenance.cwd)}`);
+    if (source) lines.push(`  ${theme.fg("muted", "Invocation:")} ${theme.fg("dim", summarizeSubagentInvocation(source.provenance))}`);
+    if (isolationFlags.length > 0) lines.push(`  ${theme.fg("muted", "Isolation:")} ${theme.fg("dim", isolationFlags.join(", "))}`);
+    if (source?.provenance.startedAt || source?.provenance.endedAt) {
+      lines.push(`  ${theme.fg("muted", "Lifetime:")} ${theme.fg("dim", `${source.provenance.startedAt ?? "?"} → ${source.provenance.endedAt ?? "running"}`)}`);
+    }
+    if (result) {
+      lines.push(`  ${theme.fg("muted", "Tools:")} ${theme.fg("dim", toolSummary || "none")}`);
+      lines.push(`  ${theme.fg("muted", "Citations:")} ${theme.fg("dim", formatSubagentCitationPreview(result.citations))}`);
+    }
+    lines.push(`  ${theme.fg("muted", "Recent stream:")}`);
+    lines.push(...renderSubagentRecentStreamLines(source, theme));
+    lines.push(`  ${theme.fg("muted", "Output preview:")}`);
+    lines.push(...renderSubagentPreviewLines(result?.output ?? source?.assistantPreview, theme));
+    if (result?.stderr.trim()) {
+      lines.push(`  ${theme.fg("muted", "stderr:")} ${theme.fg("error", summarizeSubagentText(result.stderr, MAX_SUBAGENT_STDERR_PREVIEW_CHARS))}`);
+    }
+  }
+
   return lines.join("\n");
 }
 
@@ -1842,6 +2242,32 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
         updateUI(ctx);
       }
     },
+    renderCall(args, theme, _context) {
+      const topic = summarizeSubagentText(args.topic, MAX_SUBAGENT_CALL_PREVIEW_CHARS) || "...";
+      const text = [
+        theme.fg("toolTitle", theme.bold("explore_subagents ")),
+        theme.fg("accent", topic),
+        theme.fg("muted", " · OPT/PRA/SKP · isolated subprocesses"),
+      ].join("");
+      return new Text(text, 0, 0);
+    },
+    renderResult(result, { expanded, isPartial }, theme, _context) {
+      const details = result.details as ExploreSubagentToolDetails | undefined;
+      if (!details) {
+        const textBlock = result.content.find((item) => item.type === "text");
+        const fallback = textBlock?.type === "text" ? textBlock.text : "";
+        if (isPartial) return new Text(theme.fg("warning", "Launching explore subagents..."), 0, 0);
+        return new Text(expanded ? (fallback || "(no output)") : (summarizeSubagentText(fallback, 160) || "(no output)"), 0, 0);
+      }
+
+      return new Text(
+        expanded
+          ? renderExploreSubagentExpandedText(details, isPartial, theme)
+          : renderExploreSubagentCollapsedText(details, theme),
+        0,
+        0,
+      );
+    },
   });
 
   pi.registerTool({
@@ -1944,6 +2370,38 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
         clearLiveSubagentBatches();
         updateUI(ctx);
       }
+    },
+    renderCall(args, theme, _context) {
+      const objective = summarizeSubagentText(args.objective, MAX_SUBAGENT_CALL_PREVIEW_CHARS) || "...";
+      const mode = typeof args.mode === "string" && args.mode.trim().toLowerCase() === "parallel"
+        ? "parallel"
+        : "sequential";
+      const roles = Array.isArray(args.roles) && args.roles.length > 0
+        ? args.roles.map((role) => String(role).trim().toUpperCase()).filter(Boolean).join("/")
+        : "PLN/IMP/VER";
+      const text = [
+        theme.fg("toolTitle", theme.bold("execute_subagents ")),
+        theme.fg("accent", objective),
+        theme.fg("muted", ` · ${mode} · ${roles}`),
+      ].join("");
+      return new Text(text, 0, 0);
+    },
+    renderResult(result, { expanded, isPartial }, theme, _context) {
+      const details = result.details as ExecuteSubagentToolDetails | undefined;
+      if (!details) {
+        const textBlock = result.content.find((item) => item.type === "text");
+        const fallback = textBlock?.type === "text" ? textBlock.text : "";
+        if (isPartial) return new Text(theme.fg("warning", "Launching execute subagents..."), 0, 0);
+        return new Text(expanded ? (fallback || "(no output)") : (summarizeSubagentText(fallback, 160) || "(no output)"), 0, 0);
+      }
+
+      return new Text(
+        expanded
+          ? renderExecuteSubagentExpandedText(details, isPartial, theme)
+          : renderExecuteSubagentCollapsedText(details, theme),
+        0,
+        0,
+      );
     },
   });
 
