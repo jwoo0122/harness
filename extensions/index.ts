@@ -89,6 +89,22 @@ interface ExecuteSubagentTotals {
   roleRuns: Record<ExecuteRole, number>;
 }
 
+interface ExploreLiveBatchState {
+  topic: string;
+  completed: number;
+  total: number;
+  personas: ExplorePersona[];
+  snapshots: HarnessSubagentSnapshot<ExplorePersona>[];
+}
+
+interface ExecuteLiveBatchState {
+  objective: string;
+  completed: number;
+  total: number;
+  roles: ExecuteRole[];
+  snapshots: HarnessSubagentSnapshot<ExecuteRole>[];
+}
+
 interface WebSearchResult {
   title: string;
   url: string;
@@ -611,8 +627,68 @@ function buildExecuteRoleTask(
   ].filter(Boolean).join("\n");
 }
 
+function resolveExplorePersona(persona: ExplorePersona) {
+  return EXPLORE_SUBAGENT_ROLES.find((entry) => entry.persona === persona)!;
+}
+
 function resolveExecuteRole(role: ExecuteRole) {
   return EXECUTE_SUBAGENT_ROLES.find((entry) => entry.role === role)!;
+}
+
+function formatLiveToolName(toolName: string): string {
+  switch (toolName) {
+    case "harness_web_search":
+      return "search";
+    case "harness_web_fetch":
+      return "fetch";
+    case "harness_verify_register":
+      return "register";
+    case "harness_verify_list":
+      return "registry";
+    case "harness_commit":
+      return "commit";
+    default:
+      return toolName;
+  }
+}
+
+function describeLiveSubagent<TRole extends string>(snapshot: HarnessSubagentSnapshot<TRole> | undefined): string {
+  if (!snapshot) return "queued";
+  if (snapshot.livePhase === "tool_running") {
+    return snapshot.currentToolName ? formatLiveToolName(snapshot.currentToolName) : "working";
+  }
+  if (snapshot.livePhase === "running") return "thinking";
+  if (snapshot.livePhase === "starting") return "starting";
+  if (snapshot.livePhase === "completed") return "done";
+  return "failed";
+}
+
+function formatLiveExploreBatchStatus(batch: ExploreLiveBatchState): string {
+  const snapshotsByPersona = new Map<ExplorePersona, HarnessSubagentSnapshot<ExplorePersona>>();
+  for (const snapshot of batch.snapshots) {
+    snapshotsByPersona.set(snapshot.role, snapshot);
+  }
+
+  const segments = batch.personas.map((persona) => {
+    const spec = resolveExplorePersona(persona);
+    return `${spec.icon}${persona} ${describeLiveSubagent(snapshotsByPersona.get(persona))}`;
+  });
+
+  return `🤖 ${batch.completed}/${batch.total} · ${segments.join(" · ")}`;
+}
+
+function formatLiveExecuteBatchStatus(batch: ExecuteLiveBatchState): string {
+  const snapshotsByRole = new Map<ExecuteRole, HarnessSubagentSnapshot<ExecuteRole>>();
+  for (const snapshot of batch.snapshots) {
+    snapshotsByRole.set(snapshot.role, snapshot);
+  }
+
+  const segments = batch.roles.map((role) => {
+    const spec = resolveExecuteRole(role);
+    return `${spec.icon}${role} ${describeLiveSubagent(snapshotsByRole.get(role))}`;
+  });
+
+  return `🤖 ${batch.completed}/${batch.total} · ${segments.join(" · ")}`;
 }
 
 function summarizeExecuteSubagentProgress(details: ExecuteSubagentToolDetails): string {
@@ -1044,6 +1120,8 @@ export default function (pi: ExtensionAPI) {
   let exploreTotals = createExploreEvidenceTotals();
   let exploreChain = createExploreEvidenceChain();
   let executeTotals = createExecuteSubagentTotals();
+  let liveExploreBatch: ExploreLiveBatchState | undefined;
+  let liveExecuteBatch: ExecuteLiveBatchState | undefined;
 
   function getActiveToolNames(): string[] {
     const active = pi.getActiveTools() as Array<string | { name?: string }>;
@@ -1058,6 +1136,33 @@ export default function (pi: ExtensionAPI) {
 
   function saveState() {
     pi.appendEntry("cognitive-harness-state", { ...state });
+  }
+
+  function clearLiveSubagentBatches() {
+    liveExploreBatch = undefined;
+    liveExecuteBatch = undefined;
+  }
+
+  function setLiveExploreBatch(details: ExploreSubagentToolDetails) {
+    liveExploreBatch = {
+      topic: details.topic,
+      completed: details.completed,
+      total: details.total,
+      personas: EXPLORE_SUBAGENT_ROLES.map((role) => role.persona),
+      snapshots: details.snapshots,
+    };
+    liveExecuteBatch = undefined;
+  }
+
+  function setLiveExecuteBatch(details: ExecuteSubagentToolDetails) {
+    liveExecuteBatch = {
+      objective: details.objective,
+      completed: details.completed,
+      total: details.total,
+      roles: [...details.roles],
+      snapshots: details.snapshots,
+    };
+    liveExploreBatch = undefined;
   }
 
   function resetExploreTracking() {
@@ -1168,15 +1273,11 @@ export default function (pi: ExtensionAPI) {
         "harness",
         `🧠 EXPLORE 🤖${exploreTotals.subagentRuns} 🔎${exploreTotals.searches} 🌐${exploreTotals.fetches} 🔗${exploreTotals.sources.size}`,
       );
-
-      const round = state.debateRound ?? 0;
-      const lines = [
-        "🧠 Explore Mode — Isolated Subagents + External Evidence Gate",
-        `Round: ${round}/3  |  🔴 OPT  🟡 PRA  🟢 SKP`,
-        `Evidence: 🤖 ${exploreTotals.subagentRuns} subagent rounds | 🔎 ${exploreTotals.searches} searches | 🌐 ${exploreTotals.fetches} fetches | 🔗 ${exploreTotals.sources.size} unique URLs | ↺ ${exploreTotals.retries} retries`,
-        "Tools: read-only local inspection + structured web research + mandatory isolated subagent pass",
-      ];
-      ctx.ui.setWidget("harness", lines);
+      ctx.ui.setWidget(
+        "harness",
+        liveExploreBatch ? [formatLiveExploreBatchStatus(liveExploreBatch)] : undefined,
+      );
+      return;
     }
 
     if (state.mode === "execute") {
@@ -1188,23 +1289,15 @@ export default function (pi: ExtensionAPI) {
         "harness",
         `⚙️ EXECUTE 🤖${executeTotals.subagentRuns} ✅${passed} ❌${failed} ⏳${pending} 📦${state.commitCount}`,
       );
-
-      const lines = [
-        "⚙️ Execute Mode — Isolated PLN / IMP / VER Subagents",
-        "📋 PLN → 🔨 IMP → ✅ VER → 📦 Commit",
-        `ACs: ✅ ${passed} | ❌ ${failed} | ⏳ ${pending} | Regressions: ${state.regressionCount} | Commits: ${state.commitCount}`,
-        `Subagents: 🤖 ${executeTotals.subagentRuns} runs | PLN ${executeTotals.roleRuns.PLN} | IMP ${executeTotals.roleRuns.IMP} | VER ${executeTotals.roleRuns.VER}`,
-      ];
-      if (state.currentIncrement) {
-        lines.push(`Current: ${state.currentIncrement}`);
-      }
-      ctx.ui.setWidget("harness", lines);
+      ctx.ui.setWidget(
+        "harness",
+        liveExecuteBatch ? [formatLiveExecuteBatchStatus(liveExecuteBatch)] : undefined,
+      );
+      return;
     }
 
-    if (state.mode === "off") {
-      ctx.ui.setStatus("harness", undefined);
-      ctx.ui.setWidget("harness", undefined);
-    }
+    ctx.ui.setStatus("harness", undefined);
+    ctx.ui.setWidget("harness", undefined);
   }
 
   function endExploreEvidenceChain() {
@@ -1218,6 +1311,7 @@ export default function (pi: ExtensionAPI) {
     baselineActiveTools = getActiveToolNames();
     resetExploreTracking();
     resetExecuteTracking();
+    clearLiveSubagentBatches();
 
     for (const entry of ctx.sessionManager.getEntries()) {
       if (entry.type === "custom" && entry.customType === "cognitive-harness-state") {
@@ -1252,6 +1346,7 @@ export default function (pi: ExtensionAPI) {
       saveState();
       resetExploreTracking();
       resetExecuteTracking();
+      clearLiveSubagentBatches();
       setModeTools("explore");
       updateUI(ctx);
       ctx.ui.notify("🧠 Explore mode activated — isolated subagents + structured web evidence required", "info");
@@ -1272,6 +1367,7 @@ export default function (pi: ExtensionAPI) {
       saveState();
       endExploreEvidenceChain();
       resetExecuteTracking();
+      clearLiveSubagentBatches();
       setModeTools("execute");
       updateUI(ctx);
       ctx.ui.notify("⚙️ Execute mode activated — orchestration-only parent + isolated role subagents enabled", "info");
@@ -1288,6 +1384,7 @@ export default function (pi: ExtensionAPI) {
       saveState();
       endExploreEvidenceChain();
       resetExecuteTracking();
+      clearLiveSubagentBatches();
       setModeTools("off");
       updateUI(ctx);
       ctx.ui.notify("Cognitive harness disabled", "info");
@@ -1710,30 +1807,40 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
         signal,
       }));
 
-      const results = await runHarnessSubagentBatch(specs, {
-        mode: "parallel",
-        onSnapshot: (snapshots, completed, total, batchResults) => {
-          latestSnapshots = snapshots;
-          const details = buildExploreSubagentDetails(params.topic, completed, total, batchResults, snapshots);
-          onUpdate?.({
-            content: [{ type: "text", text: summarizeExploreSubagentProgress(details) }],
-            details,
-          });
-        },
-      });
+      setLiveExploreBatch(buildExploreSubagentDetails(params.topic, 0, EXPLORE_SUBAGENT_ROLES.length, [], []));
+      updateUI(ctx);
 
-      const details = buildExploreSubagentDetails(
-        params.topic,
-        results.length,
-        EXPLORE_SUBAGENT_ROLES.length,
-        results,
-        latestSnapshots,
-      );
+      try {
+        const results = await runHarnessSubagentBatch(specs, {
+          mode: "parallel",
+          onSnapshot: (snapshots, completed, total, batchResults) => {
+            latestSnapshots = snapshots;
+            const details = buildExploreSubagentDetails(params.topic, completed, total, batchResults, snapshots);
+            setLiveExploreBatch(details);
+            updateUI(ctx);
+            onUpdate?.({
+              content: [{ type: "text", text: summarizeExploreSubagentProgress(details) }],
+              details,
+            });
+          },
+        });
 
-      return {
-        content: [{ type: "text", text: formatExploreSubagentResults(details) }],
-        details,
-      };
+        const details = buildExploreSubagentDetails(
+          params.topic,
+          results.length,
+          EXPLORE_SUBAGENT_ROLES.length,
+          results,
+          latestSnapshots,
+        );
+
+        return {
+          content: [{ type: "text", text: formatExploreSubagentResults(details) }],
+          details,
+        };
+      } finally {
+        clearLiveSubagentBatches();
+        updateUI(ctx);
+      }
     },
   });
 
@@ -1790,43 +1897,53 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
         };
       });
 
-      const results = await runHarnessSubagentBatch(specs, {
-        mode,
-        taskResolver: mode === "sequential"
-          ? (spec, previousResults) => {
-              if (previousResults.length === 0) return spec.task;
-              return [
-                spec.task,
-                "",
-                "Context from prior role outputs:",
-                formatPriorSubagentOutputs(previousResults),
-              ].join("\n");
-            }
-          : undefined,
-        onSnapshot: (snapshots, completed, total, batchResults) => {
-          latestSnapshots = snapshots;
-          const details = buildExecuteSubagentDetails(params.objective, mode, roles, completed, total, batchResults, snapshots);
-          onUpdate?.({
-            content: [{ type: "text", text: summarizeExecuteSubagentProgress(details) }],
-            details,
-          });
-        },
-      });
+      setLiveExecuteBatch(buildExecuteSubagentDetails(params.objective, mode, roles, 0, roles.length, [], []));
+      updateUI(ctx);
 
-      const details = buildExecuteSubagentDetails(
-        params.objective,
-        mode,
-        roles,
-        results.length,
-        roles.length,
-        results,
-        latestSnapshots,
-      );
+      try {
+        const results = await runHarnessSubagentBatch(specs, {
+          mode,
+          taskResolver: mode === "sequential"
+            ? (spec, previousResults) => {
+                if (previousResults.length === 0) return spec.task;
+                return [
+                  spec.task,
+                  "",
+                  "Context from prior role outputs:",
+                  formatPriorSubagentOutputs(previousResults),
+                ].join("\n");
+              }
+            : undefined,
+          onSnapshot: (snapshots, completed, total, batchResults) => {
+            latestSnapshots = snapshots;
+            const details = buildExecuteSubagentDetails(params.objective, mode, roles, completed, total, batchResults, snapshots);
+            setLiveExecuteBatch(details);
+            updateUI(ctx);
+            onUpdate?.({
+              content: [{ type: "text", text: summarizeExecuteSubagentProgress(details) }],
+              details,
+            });
+          },
+        });
 
-      return {
-        content: [{ type: "text", text: formatExecuteSubagentResults(details) }],
-        details,
-      };
+        const details = buildExecuteSubagentDetails(
+          params.objective,
+          mode,
+          roles,
+          results.length,
+          roles.length,
+          results,
+          latestSnapshots,
+        );
+
+        return {
+          content: [{ type: "text", text: formatExecuteSubagentResults(details) }],
+          details,
+        };
+      } finally {
+        clearLiveSubagentBatches();
+        updateUI(ctx);
+      }
     },
   });
 
@@ -2053,6 +2170,7 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
       if (next === "explore") resetExploreTracking();
       if (next === "execute") resetExecuteTracking();
       if (next !== "explore") endExploreEvidenceChain();
+      clearLiveSubagentBatches();
       setModeTools(next);
       updateUI(ctx);
       ctx.ui.notify(`Harness: ${next === "off" ? "disabled" : next}`, "info");
