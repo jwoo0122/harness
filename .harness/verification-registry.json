@@ -12,7 +12,7 @@
           "README.md",
           "INTEGRATION.md"
         ],
-        "description": "Smoke validation of verification-registry plumbing: register one AC entry in execute mode, relying on the extension to create .harness/verification-registry.json if absent, then confirm listing can return cumulative entries."
+        "description": "Regression re-check of verification-registry plumbing after INC-1: update the existing AC entry via harness_verify_register, then confirm harness_verify_list can still return cumulative entries in execute mode."
       },
       "registeredAt": "INC-1",
       "lastVerifiedAt": "INC-1",
