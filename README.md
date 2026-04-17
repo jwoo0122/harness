@@ -112,11 +112,21 @@ harness/
 ### Skills are self-contained
 Each SKILL.md works without the extension. The extension adds enforcement — it doesn't change the protocol. This means the same skills can be used in Claude Code, Codex, or any agent that supports the [Agent Skills standard](https://agentskills.io).
 
-### Extension adds four layers
+### Extension adds five layers
 1. **Tool gating** — explore mode blocks write/edit/build, and main execute mode blocks direct implementation commands in favor of role delegation
 2. **Isolated subagents** — `/explore` and `/execute` can invoke real subprocess agents with role-specific tool policies
-3. **State tracking** — AC statuses persist in the session via `appendEntry`
-4. **TUI feedback** — footer status + widget show current mode, AC progress
+3. **Verification registry plumbing** — execute mode exposes `harness_verify_register` and `harness_verify_list`, persisting reproducible AC verification methods in `.harness/verification-registry.json`
+4. **State tracking** — AC statuses persist in the session via `appendEntry`
+5. **TUI feedback** — footer status + widget show current mode, AC progress
+
+### Verification registry smoke path
+For a smoke-level execute increment, VER should be able to:
+1. run baseline checks,
+2. load or create `.harness/verification-registry.json`,
+3. register a passing AC with `harness_verify_register`, and
+4. list cumulative entries with `harness_verify_list` before regression checks.
+
+This package ships the registry plumbing and workflow guidance. Project-specific repos still provide the actual verification commands that VER records and re-runs.
 
 ### No project-specific assumptions
 The skills reference generic concepts ("formatter check", "linter", "test suite") rather than specific tools. They adapt to any tech stack.

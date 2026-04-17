@@ -1,0 +1,22 @@
+{
+  "$schema": "harness-verification-registry-v1",
+  "entries": {
+    "AC-SMOKE-1": {
+      "requirement": "VER can register a passing AC in execute mode and persist it to the verification registry for later regression checks",
+      "source": "README.md; INTEGRATION.md",
+      "verification": {
+        "strategy": "manual-check",
+        "command": "invoke harness_verify_register and harness_verify_list in execute mode",
+        "files": [
+          "extensions/index.ts",
+          "README.md",
+          "INTEGRATION.md"
+        ],
+        "description": "Smoke validation of verification-registry plumbing: register one AC entry in execute mode, relying on the extension to create .harness/verification-registry.json if absent, then confirm listing can return cumulative entries."
+      },
+      "registeredAt": "INC-1",
+      "lastVerifiedAt": "INC-1",
+      "lastResult": "pass"
+    }
+  }
+}

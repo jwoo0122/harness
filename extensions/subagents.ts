@@ -5,8 +5,41 @@ import { basename } from "node:path";
 export type HarnessMode = "explore" | "execute";
 export type SubagentBashPolicy = "none" | "read-only" | "verify" | "implement";
 export type SubagentBatchMode = "parallel" | "sequential";
+export type HarnessSubagentLivePhase = "starting" | "running" | "tool_running" | "completed" | "failed";
 
 const BUILTIN_TOOL_NAMES = new Set(["read", "bash", "edit", "write", "grep", "find", "ls"]);
+const MAX_RECENT_STREAM_ITEMS = 24;
+const MAX_ASSISTANT_PREVIEW_CHARS = 400;
+const MAX_STREAM_ITEM_TEXT_CHARS = 160;
+
+export interface HarnessSubagentProvenance {
+  pid?: number;
+  command: string;
+  args: string[];
+  cwd: string;
+  startedAt?: string;
+  endedAt?: string;
+}
+
+export interface HarnessSubagentRecentStreamItem {
+  at: string;
+  type: "assistant_text" | "tool_execution_start" | "tool_execution_end";
+  toolName?: string;
+  text?: string;
+  isError?: boolean;
+}
+
+export interface HarnessSubagentSnapshot<TRole extends string = string> {
+  mode: HarnessMode;
+  role: TRole;
+  label: string;
+  livePhase: HarnessSubagentLivePhase;
+  currentToolName?: string;
+  assistantPreview: string;
+  recentStream: HarnessSubagentRecentStreamItem[];
+  model?: string;
+  provenance: HarnessSubagentProvenance;
+}
 
 export interface HarnessSubagentSpec<TRole extends string = string> {
   mode: HarnessMode;
@@ -23,17 +56,17 @@ export interface HarnessSubagentSpec<TRole extends string = string> {
   signal?: AbortSignal;
 }
 
-export interface HarnessSubagentRunResult<TRole extends string = string> {
-  mode: HarnessMode;
-  role: TRole;
-  label: string;
+export interface HarnessSubagentRunResult<TRole extends string = string> extends HarnessSubagentSnapshot<TRole> {
   task: string;
   output: string;
   citations: string[];
   toolCalls: Record<string, number>;
   exitCode: number;
   stderr: string;
-  model?: string;
+}
+
+interface HarnessSubagentRunOptions<TRole extends string = string> {
+  onSnapshot?: (snapshot: HarnessSubagentSnapshot<TRole>) => void;
 }
 
 interface HarnessSubagentBatchOptions<TRole extends string = string> {
@@ -42,7 +75,18 @@ interface HarnessSubagentBatchOptions<TRole extends string = string> {
     spec: HarnessSubagentSpec<TRole>,
     previousResults: HarnessSubagentRunResult<TRole>[],
   ) => string;
-  onProgress?: (results: HarnessSubagentRunResult<TRole>[], completed: number, total: number) => void;
+  onProgress?: (
+    results: HarnessSubagentRunResult<TRole>[],
+    completed: number,
+    total: number,
+    snapshots: HarnessSubagentSnapshot<TRole>[],
+  ) => void;
+  onSnapshot?: (
+    snapshots: HarnessSubagentSnapshot<TRole>[],
+    completed: number,
+    total: number,
+    results: HarnessSubagentRunResult<TRole>[],
+  ) => void;
 }
 
 function normalizeSourceUrl(url: string): string {
@@ -114,18 +158,7 @@ function getBuiltInToolArgs(activeTools: string[]): string[] {
   return ["--no-tools"];
 }
 
-export function formatPriorSubagentOutputs<TRole extends string>(results: HarnessSubagentRunResult<TRole>[]): string {
-  return results
-    .map((result) => [
-      `### ${result.label}`,
-      result.output || "[No assistant output captured]",
-    ].join("\n"))
-    .join("\n\n");
-}
-
-export async function runHarnessSubagentProcess<TRole extends string>(
-  spec: HarnessSubagentSpec<TRole>,
-): Promise<HarnessSubagentRunResult<TRole>> {
+function buildSubagentCliArgs<TRole extends string>(spec: HarnessSubagentSpec<TRole>): string[] {
   const args = [
     "--mode",
     "json",
@@ -150,14 +183,131 @@ export async function runHarnessSubagentProcess<TRole extends string>(
   }
 
   args.push(spec.task);
+  return args;
+}
 
-  const invocation = getPiInvocation(args);
+function cloneRecentStream(
+  recentStream: HarnessSubagentRecentStreamItem[],
+): HarnessSubagentRecentStreamItem[] {
+  return recentStream.map((item) => ({ ...item }));
+}
+
+function cloneSnapshot<TRole extends string>(snapshot: HarnessSubagentSnapshot<TRole>): HarnessSubagentSnapshot<TRole> {
+  return {
+    ...snapshot,
+    provenance: {
+      ...snapshot.provenance,
+      args: [...snapshot.provenance.args],
+    },
+    recentStream: cloneRecentStream(snapshot.recentStream),
+  };
+}
+
+function summarizeTextFragment(text: string, maxChars = MAX_STREAM_ITEM_TEXT_CHARS): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) return "";
+  if (normalized.length <= maxChars) return normalized;
+  return `${normalized.slice(0, maxChars - 1)}…`;
+}
+
+function summarizeToolArgs(toolName: string, args: any): string | undefined {
+  if (toolName === "bash" && typeof args?.command === "string") {
+    return summarizeTextFragment(args.command);
+  }
+
+  if (typeof args?.path === "string") {
+    return summarizeTextFragment(args.path);
+  }
+
+  try {
+    const serialized = JSON.stringify(args);
+    return serialized ? summarizeTextFragment(serialized) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function lastMapValue<TKey>(map: Map<TKey, string>): string | undefined {
+  let value: string | undefined;
+  for (const current of map.values()) value = current;
+  return value;
+}
+
+function pushRecentStream<TRole extends string>(
+  snapshot: HarnessSubagentSnapshot<TRole>,
+  item: HarnessSubagentRecentStreamItem,
+) {
+  snapshot.recentStream.push(item);
+  if (snapshot.recentStream.length > MAX_RECENT_STREAM_ITEMS) {
+    snapshot.recentStream.splice(0, snapshot.recentStream.length - MAX_RECENT_STREAM_ITEMS);
+  }
+}
+
+export function formatPriorSubagentOutputs<TRole extends string>(results: HarnessSubagentRunResult<TRole>[]): string {
+  return results
+    .map((result) => [
+      `### ${result.label}`,
+      result.output || "[No assistant output captured]",
+    ].join("\n"))
+    .join("\n\n");
+}
+
+export async function runHarnessSubagentProcess<TRole extends string>(
+  spec: HarnessSubagentSpec<TRole>,
+  options: HarnessSubagentRunOptions<TRole> = {},
+): Promise<HarnessSubagentRunResult<TRole>> {
+  const invocation = getPiInvocation(buildSubagentCliArgs(spec));
   const toolCalls: Record<string, number> = {};
   const citations = new Set<string>();
   const assistantMessages: any[] = [];
+  const inFlightTools = new Map<string, string>();
+  const snapshot: HarnessSubagentSnapshot<TRole> = {
+    mode: spec.mode,
+    role: spec.role,
+    label: spec.label,
+    livePhase: "starting",
+    assistantPreview: "",
+    recentStream: [],
+    model: spec.modelSpec,
+    provenance: {
+      command: invocation.command,
+      args: [...invocation.args],
+      cwd: spec.cwd,
+    },
+  };
+
   let stderr = "";
   let model = spec.modelSpec;
   let wasAborted = false;
+  let assistantPreviewTail = "";
+  let assistantPreviewWasTrimmed = false;
+
+  const emitSnapshot = () => options.onSnapshot?.(cloneSnapshot(snapshot));
+  const refreshLiveState = () => {
+    snapshot.currentToolName = lastMapValue(inFlightTools);
+    if (snapshot.livePhase === "completed" || snapshot.livePhase === "failed") return;
+    snapshot.livePhase = snapshot.currentToolName ? "tool_running" : "running";
+  };
+  const syncAssistantPreview = (text: string) => {
+    if (text.length > MAX_ASSISTANT_PREVIEW_CHARS) {
+      assistantPreviewTail = text.slice(-MAX_ASSISTANT_PREVIEW_CHARS);
+      assistantPreviewWasTrimmed = true;
+    } else {
+      assistantPreviewTail = text;
+      assistantPreviewWasTrimmed = false;
+    }
+    snapshot.assistantPreview = assistantPreviewWasTrimmed ? `…${assistantPreviewTail}` : assistantPreviewTail;
+  };
+  const appendAssistantPreview = (delta: string) => {
+    const next = assistantPreviewTail + delta;
+    if (next.length > MAX_ASSISTANT_PREVIEW_CHARS) {
+      assistantPreviewTail = next.slice(-MAX_ASSISTANT_PREVIEW_CHARS);
+      assistantPreviewWasTrimmed = true;
+    } else {
+      assistantPreviewTail = next;
+    }
+    snapshot.assistantPreview = assistantPreviewWasTrimmed ? `…${assistantPreviewTail}` : assistantPreviewTail;
+  };
 
   const exitCode = await new Promise<number>((resolve) => {
     const child = spawn(invocation.command, invocation.args, {
@@ -173,7 +323,34 @@ export async function runHarnessSubagentProcess<TRole extends string>(
       stdio: ["ignore", "pipe", "pipe"],
     });
 
+    snapshot.provenance.pid = child.pid ?? undefined;
+    snapshot.provenance.startedAt = new Date().toISOString();
+    emitSnapshot();
+
     let buffer = "";
+    let settled = false;
+    let finalized = false;
+    let abortListener: (() => void) | undefined;
+
+    const settle = (code: number) => {
+      if (settled) return;
+      settled = true;
+      if (spec.signal && abortListener) {
+        spec.signal.removeEventListener("abort", abortListener);
+      }
+      resolve(code);
+    };
+
+    const finalizeSnapshot = (code: number) => {
+      if (finalized) return;
+      finalized = true;
+      snapshot.model = model;
+      snapshot.provenance.endedAt = new Date().toISOString();
+      inFlightTools.clear();
+      snapshot.currentToolName = undefined;
+      snapshot.livePhase = code === 0 ? "completed" : "failed";
+      emitSnapshot();
+    };
 
     const processLine = (line: string) => {
       if (!line.trim()) return;
@@ -185,6 +362,47 @@ export async function runHarnessSubagentProcess<TRole extends string>(
         return;
       }
 
+      if (event.type === "message_update" && event.message?.role === "assistant") {
+        const assistantEvent = event.assistantMessageEvent;
+        if (assistantEvent?.type === "text_delta" && typeof assistantEvent.delta === "string") {
+          appendAssistantPreview(assistantEvent.delta);
+          pushRecentStream(snapshot, {
+            at: new Date().toISOString(),
+            type: "assistant_text",
+            text: summarizeTextFragment(assistantEvent.delta),
+          });
+          refreshLiveState();
+          emitSnapshot();
+        }
+        return;
+      }
+
+      if (event.type === "tool_execution_start" && typeof event.toolName === "string") {
+        inFlightTools.set(String(event.toolCallId ?? `${event.toolName}:${Date.now()}`), event.toolName);
+        refreshLiveState();
+        pushRecentStream(snapshot, {
+          at: new Date().toISOString(),
+          type: "tool_execution_start",
+          toolName: event.toolName,
+          text: summarizeToolArgs(event.toolName, event.args),
+        });
+        emitSnapshot();
+        return;
+      }
+
+      if (event.type === "tool_execution_end" && typeof event.toolName === "string") {
+        inFlightTools.delete(String(event.toolCallId ?? ""));
+        refreshLiveState();
+        pushRecentStream(snapshot, {
+          at: new Date().toISOString(),
+          type: "tool_execution_end",
+          toolName: event.toolName,
+          isError: Boolean(event.isError),
+        });
+        emitSnapshot();
+        return;
+      }
+
       if (event.type !== "message_end" || !event.message) return;
 
       const message = event.message as any;
@@ -192,6 +410,14 @@ export async function runHarnessSubagentProcess<TRole extends string>(
         assistantMessages.push(message);
         if (typeof message.model === "string" && message.model) {
           model = message.model;
+          snapshot.model = message.model;
+        }
+
+        const assistantText = extractAssistantText(message);
+        if (assistantText) {
+          syncAssistantPreview(assistantText);
+          refreshLiveState();
+          emitSnapshot();
         }
         return;
       }
@@ -225,10 +451,14 @@ export async function runHarnessSubagentProcess<TRole extends string>(
 
     child.on("close", (code) => {
       if (buffer.trim()) processLine(buffer);
-      resolve(code ?? 0);
+      finalizeSnapshot(code ?? 0);
+      settle(code ?? 0);
     });
 
-    child.on("error", () => resolve(1));
+    child.on("error", () => {
+      finalizeSnapshot(1);
+      settle(1);
+    });
 
     if (spec.signal) {
       const killChild = () => {
@@ -239,6 +469,7 @@ export async function runHarnessSubagentProcess<TRole extends string>(
         }, 3000);
       };
 
+      abortListener = killChild;
       if (spec.signal.aborted) {
         killChild();
       } else {
@@ -252,6 +483,9 @@ export async function runHarnessSubagentProcess<TRole extends string>(
   }
 
   const output = lastAssistantMessageText(assistantMessages);
+  if (output) {
+    syncAssistantPreview(output);
+  }
   for (const url of extractUrlsFromText(output)) citations.add(normalizeSourceUrl(url));
 
   return {
@@ -265,6 +499,14 @@ export async function runHarnessSubagentProcess<TRole extends string>(
     exitCode,
     stderr,
     model,
+    livePhase: exitCode === 0 ? "completed" : "failed",
+    currentToolName: undefined,
+    assistantPreview: snapshot.assistantPreview,
+    recentStream: cloneRecentStream(snapshot.recentStream),
+    provenance: {
+      ...snapshot.provenance,
+      args: [...snapshot.provenance.args],
+    },
   };
 }
 
@@ -272,28 +514,60 @@ export async function runHarnessSubagentBatch<TRole extends string>(
   specs: HarnessSubagentSpec<TRole>[],
   options: HarnessSubagentBatchOptions<TRole>,
 ): Promise<HarnessSubagentRunResult<TRole>[]> {
-  const results: HarnessSubagentRunResult<TRole>[] = [];
-  const emitProgress = () => options.onProgress?.([...results], results.length, specs.length);
+  const resultSlots: Array<HarnessSubagentRunResult<TRole> | undefined> = new Array(specs.length).fill(undefined);
+  const snapshotSlots: Array<HarnessSubagentSnapshot<TRole> | undefined> = new Array(specs.length).fill(undefined);
+
+  const getResults = () => resultSlots.filter((result): result is HarnessSubagentRunResult<TRole> => Boolean(result));
+  const getSnapshots = () => snapshotSlots
+    .filter((snapshot): snapshot is HarnessSubagentSnapshot<TRole> => Boolean(snapshot))
+    .map((snapshot) => cloneSnapshot(snapshot));
+  const emitProgress = () => {
+    const results = getResults();
+    options.onProgress?.(results, results.length, specs.length, getSnapshots());
+  };
+  const emitSnapshot = () => {
+    const results = getResults();
+    const snapshots = getSnapshots();
+    options.onSnapshot?.(snapshots, results.length, specs.length, results);
+  };
 
   if (options.mode === "parallel") {
     emitProgress();
-    await Promise.all(specs.map(async (spec) => {
+    emitSnapshot();
+    await Promise.all(specs.map(async (spec, index) => {
       const result = await runHarnessSubagentProcess({
         ...spec,
         task: options.taskResolver ? options.taskResolver(spec, []) : spec.task,
+      }, {
+        onSnapshot: (snapshot) => {
+          snapshotSlots[index] = snapshot;
+          emitSnapshot();
+        },
       });
-      results.push(result);
+      resultSlots[index] = result;
+      snapshotSlots[index] = cloneSnapshot(result);
+      emitSnapshot();
       emitProgress();
     }));
-    return results;
+    return getResults();
   }
 
   emitProgress();
-  for (const spec of specs) {
-    const task = options.taskResolver ? options.taskResolver(spec, results) : spec.task;
-    const result = await runHarnessSubagentProcess({ ...spec, task });
-    results.push(result);
+  emitSnapshot();
+  for (let index = 0; index < specs.length; index++) {
+    const spec = specs[index];
+    const previousResults = getResults();
+    const task = options.taskResolver ? options.taskResolver(spec, previousResults) : spec.task;
+    const result = await runHarnessSubagentProcess({ ...spec, task }, {
+      onSnapshot: (snapshot) => {
+        snapshotSlots[index] = snapshot;
+        emitSnapshot();
+      },
+    });
+    resultSlots[index] = result;
+    snapshotSlots[index] = cloneSnapshot(result);
+    emitSnapshot();
     emitProgress();
   }
-  return results;
+  return getResults();
 }

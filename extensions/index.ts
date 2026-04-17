@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   type HarnessSubagentRunResult,
+  type HarnessSubagentSnapshot,
   type HarnessSubagentSpec,
   type SubagentBashPolicy,
   formatPriorSubagentOutputs,
@@ -54,17 +55,11 @@ interface ExploreEvidenceChain {
   retries: number;
 }
 
-interface ExploreSubagentResult {
+interface ExploreSubagentResult extends HarnessSubagentRunResult<ExplorePersona> {
   persona: ExplorePersona;
-  label: string;
   topic: string;
-  output: string;
-  citations: string[];
   searches: number;
   fetches: number;
-  exitCode: number;
-  stderr: string;
-  model?: string;
 }
 
 interface ExploreSubagentToolDetails {
@@ -72,18 +67,11 @@ interface ExploreSubagentToolDetails {
   completed: number;
   total: number;
   results: ExploreSubagentResult[];
+  snapshots: HarnessSubagentSnapshot<ExplorePersona>[];
 }
 
-interface ExecuteSubagentResult {
-  role: ExecuteRole;
-  label: string;
+interface ExecuteSubagentResult extends HarnessSubagentRunResult<ExecuteRole> {
   objective: string;
-  output: string;
-  citations: string[];
-  toolCalls: Record<string, number>;
-  exitCode: number;
-  stderr: string;
-  model?: string;
 }
 
 interface ExecuteSubagentToolDetails {
@@ -93,6 +81,7 @@ interface ExecuteSubagentToolDetails {
   total: number;
   roles: ExecuteRole[];
   results: ExecuteSubagentResult[];
+  snapshots: HarnessSubagentSnapshot<ExecuteRole>[];
 }
 
 interface ExecuteSubagentTotals {
@@ -660,30 +649,54 @@ function formatExecuteSubagentResults(details: ExecuteSubagentToolDetails): stri
 
 function mapExploreRunResult(topic: string, result: HarnessSubagentRunResult<ExplorePersona>): ExploreSubagentResult {
   return {
+    ...result,
     persona: result.role,
-    label: result.label,
     topic,
-    output: result.output,
-    citations: result.citations,
     searches: result.toolCalls.harness_web_search ?? 0,
     fetches: result.toolCalls.harness_web_fetch ?? 0,
-    exitCode: result.exitCode,
-    stderr: result.stderr,
-    model: result.model,
+  };
+}
+
+function buildExploreSubagentDetails(
+  topic: string,
+  completed: number,
+  total: number,
+  results: HarnessSubagentRunResult<ExplorePersona>[],
+  snapshots: HarnessSubagentSnapshot<ExplorePersona>[],
+): ExploreSubagentToolDetails {
+  return {
+    topic,
+    completed,
+    total,
+    results: results.map((result) => mapExploreRunResult(topic, result)),
+    snapshots,
   };
 }
 
 function mapExecuteRunResult(objective: string, result: HarnessSubagentRunResult<ExecuteRole>): ExecuteSubagentResult {
   return {
-    role: result.role,
-    label: result.label,
+    ...result,
     objective,
-    output: result.output,
-    citations: result.citations,
-    toolCalls: result.toolCalls,
-    exitCode: result.exitCode,
-    stderr: result.stderr,
-    model: result.model,
+  };
+}
+
+function buildExecuteSubagentDetails(
+  objective: string,
+  mode: "parallel" | "sequential",
+  roles: ExecuteRole[],
+  completed: number,
+  total: number,
+  results: HarnessSubagentRunResult<ExecuteRole>[],
+  snapshots: HarnessSubagentSnapshot<ExecuteRole>[],
+): ExecuteSubagentToolDetails {
+  return {
+    objective,
+    mode,
+    completed,
+    total,
+    roles,
+    results: results.map((result) => mapExecuteRunResult(objective, result)),
+    snapshots,
   };
 }
 
@@ -1680,7 +1693,7 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
 
       const modelSpec = modelToCliSpec(ctx.model as { provider?: string; id?: string } | undefined);
       const thinkingLevel = pi.getThinkingLevel();
-      const orderedResults: Array<ExploreSubagentResult | undefined> = new Array(EXPLORE_SUBAGENT_ROLES.length).fill(undefined);
+      let latestSnapshots: HarnessSubagentSnapshot<ExplorePersona>[] = [];
 
       const specs: HarnessSubagentSpec<ExplorePersona>[] = EXPLORE_SUBAGENT_ROLES.map((role) => ({
         mode: "explore",
@@ -1699,18 +1712,9 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
 
       const results = await runHarnessSubagentBatch(specs, {
         mode: "parallel",
-        onProgress: (batchResults, completed, total) => {
-          for (const result of batchResults) {
-            const index = EXPLORE_SUBAGENT_ROLES.findIndex((role) => role.persona === result.role);
-            if (index >= 0) orderedResults[index] = mapExploreRunResult(params.topic, result);
-          }
-
-          const details: ExploreSubagentToolDetails = {
-            topic: params.topic,
-            completed,
-            total,
-            results: orderedResults.filter((result): result is ExploreSubagentResult => Boolean(result)),
-          };
+        onSnapshot: (snapshots, completed, total, batchResults) => {
+          latestSnapshots = snapshots;
+          const details = buildExploreSubagentDetails(params.topic, completed, total, batchResults, snapshots);
           onUpdate?.({
             content: [{ type: "text", text: summarizeExploreSubagentProgress(details) }],
             details,
@@ -1718,17 +1722,13 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
         },
       });
 
-      for (const result of results) {
-        const index = EXPLORE_SUBAGENT_ROLES.findIndex((role) => role.persona === result.role);
-        if (index >= 0) orderedResults[index] = mapExploreRunResult(params.topic, result);
-      }
-
-      const details: ExploreSubagentToolDetails = {
-        topic: params.topic,
-        completed: results.length,
-        total: EXPLORE_SUBAGENT_ROLES.length,
-        results: orderedResults.filter((result): result is ExploreSubagentResult => Boolean(result)),
-      };
+      const details = buildExploreSubagentDetails(
+        params.topic,
+        results.length,
+        EXPLORE_SUBAGENT_ROLES.length,
+        results,
+        latestSnapshots,
+      );
 
       return {
         content: [{ type: "text", text: formatExploreSubagentResults(details) }],
@@ -1770,7 +1770,7 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
       const mode = (params.mode?.trim().toLowerCase() === "parallel" ? "parallel" : "sequential") as "parallel" | "sequential";
       const modelSpec = modelToCliSpec(ctx.model as { provider?: string; id?: string } | undefined);
       const thinkingLevel = pi.getThinkingLevel();
-      const orderedResults: Array<ExecuteSubagentResult | undefined> = new Array(roles.length).fill(undefined);
+      let latestSnapshots: HarnessSubagentSnapshot<ExecuteRole>[] = [];
 
       const specs: HarnessSubagentSpec<ExecuteRole>[] = roles.map((role) => {
         const spec = resolveExecuteRole(role);
@@ -1803,20 +1803,9 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
               ].join("\n");
             }
           : undefined,
-        onProgress: (batchResults, completed, total) => {
-          for (const result of batchResults) {
-            const index = roles.findIndex((role) => role === result.role);
-            if (index >= 0) orderedResults[index] = mapExecuteRunResult(params.objective, result);
-          }
-
-          const details: ExecuteSubagentToolDetails = {
-            objective: params.objective,
-            mode,
-            completed,
-            total,
-            roles,
-            results: orderedResults.filter((result): result is ExecuteSubagentResult => Boolean(result)),
-          };
+        onSnapshot: (snapshots, completed, total, batchResults) => {
+          latestSnapshots = snapshots;
+          const details = buildExecuteSubagentDetails(params.objective, mode, roles, completed, total, batchResults, snapshots);
           onUpdate?.({
             content: [{ type: "text", text: summarizeExecuteSubagentProgress(details) }],
             details,
@@ -1824,19 +1813,15 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
         },
       });
 
-      for (const result of results) {
-        const index = roles.findIndex((role) => role === result.role);
-        if (index >= 0) orderedResults[index] = mapExecuteRunResult(params.objective, result);
-      }
-
-      const details: ExecuteSubagentToolDetails = {
-        objective: params.objective,
+      const details = buildExecuteSubagentDetails(
+        params.objective,
         mode,
-        completed: results.length,
-        total: roles.length,
         roles,
-        results: orderedResults.filter((result): result is ExecuteSubagentResult => Boolean(result)),
-      };
+        results.length,
+        roles.length,
+        results,
+        latestSnapshots,
+      );
 
       return {
         content: [{ type: "text", text: formatExecuteSubagentResults(details) }],

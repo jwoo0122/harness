@@ -59,6 +59,21 @@ The execute skill's VER role naturally invokes project-specific verification:
 - "Based on what changed, invoke project-specific verification"
 - VER will discover and use `/verify-native` and `/verify-web` when available
 
+## Verification registry plumbing
+
+Execute mode also includes cumulative verification registry plumbing for smoke-level workflow validation:
+- registry file path: `.harness/verification-registry.json`
+- schema marker: `harness-verification-registry-v1`
+- register tool: `harness_verify_register`
+- list tool: `harness_verify_list`
+
+Expected smoke behavior for an integrated project:
+1. VER baseline loads the registry if present, or the extension creates it on first registration.
+2. After an AC is verified, VER records the reproducible method with `harness_verify_register`.
+3. Before regression checks, VER calls `harness_verify_list` and re-runs each registered command.
+
+This package provides the registry mechanism; the host project supplies the concrete verification commands worth registering.
+
 ## For Claude Code users (no pi)
 
 Copy skills only:
