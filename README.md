@@ -54,6 +54,7 @@ This gives you:
 - verification registry tools for cumulative AC verification
 - footer status for current mode and counters
 - **live subagent widget only while a subagent batch is running**
+- compact text-first tool rows for built-ins + harness tools (minimal/no output when collapsed, no colored tool box background)
 - state persistence across session restarts
 - prompt templates: `/debate`, `/ac-check`
 - keyboard shortcut: `Ctrl+Shift+H`

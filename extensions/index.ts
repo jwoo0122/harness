@@ -1,10 +1,11 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { isToolCallEventType } from "@mariozechner/pi-coding-agent";
-import { Text } from "@mariozechner/pi-tui";
+import { Container, Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { registerCompactBuiltinToolRenderers } from "./compact-tool-renderers.js";
 import {
   type HarnessSubagentRunResult,
   type HarnessSubagentSnapshot,
@@ -1018,6 +1019,75 @@ function summarizeSubagentText(text: string | undefined, maxChars: number): stri
   return `${normalized.slice(0, maxChars - 1)}…`;
 }
 
+function extractToolTextContent(result: { content?: Array<{ type?: string; text?: string }> } | undefined): string {
+  return (result?.content ?? [])
+    .filter((item): item is { type: "text"; text: string } => item.type === "text" && typeof item.text === "string")
+    .map((item) => item.text)
+    .join("\n")
+    .trim();
+}
+
+function renderEmptyToolContent(): Container {
+  return new Container();
+}
+
+function renderToolTextBlock(
+  text: string | undefined,
+  theme: { fg: (token: string, text: string) => string },
+  token: string = "toolOutput",
+): Text | Container {
+  const normalized = (text ?? "").trim();
+  if (!normalized) return renderEmptyToolContent();
+
+  const content = normalized
+    .split("\n")
+    .map((line) => theme.fg(token, line))
+    .join("\n");
+  return new Text(content, 0, 0);
+}
+
+function compactToolStatusPrefix(
+  theme: { fg: (token: string, text: string) => string },
+  context: { isPartial?: boolean; executionStarted?: boolean; isError?: boolean },
+): string {
+  if (context.isError) return theme.fg("error", "✕");
+  if (!context.executionStarted || context.isPartial) return theme.fg("warning", "…");
+  return theme.fg("success", "✓");
+}
+
+function compactToolTitle(
+  theme: { fg: (token: string, text: string) => string; bold: (text: string) => string },
+  context: { isPartial?: boolean; executionStarted?: boolean; isError?: boolean },
+  title: string,
+): string {
+  return `${compactToolStatusPrefix(theme, context)} ${theme.fg("toolTitle", theme.bold(title))}`;
+}
+
+function renderCompactToolResult(
+  result: { content?: Array<{ type?: string; text?: string }> },
+  options: { expanded: boolean },
+  theme: { fg: (token: string, text: string) => string },
+  context: { isError?: boolean },
+  collapsedSummary?: string,
+): Text | Container {
+  const text = extractToolTextContent(result);
+
+  if (options.expanded) {
+    return renderToolTextBlock(text, theme, context.isError ? "error" : "toolOutput");
+  }
+
+  if (context.isError) {
+    const summary = summarizeSubagentText(text || "Tool failed.", MAX_SUBAGENT_STDERR_PREVIEW_CHARS);
+    return renderToolTextBlock(summary, theme, "error");
+  }
+
+  if (collapsedSummary) {
+    return renderToolTextBlock(collapsedSummary, theme, "muted");
+  }
+
+  return renderEmptyToolContent();
+}
+
 function quoteCliArg(arg: string): string {
   if (!arg) return '""';
   if (/[\s"'\\]/.test(arg)) return JSON.stringify(arg);
@@ -1278,36 +1348,49 @@ function renderExploreSubagentCollapsedText(
   details: ExploreSubagentToolDetails,
   theme: { fg: (token: string, text: string) => string; bold: (text: string) => string },
 ): string {
-  return EXPLORE_SUBAGENT_ROLES.map((role) => {
-    const result = details.results.find((entry) => entry.persona === role.persona);
-    const snapshot = details.snapshots.find((entry) => entry.role === role.persona);
-    const source = snapshot ?? result;
-    const line = [
-      theme.fg("toolTitle", theme.bold(`${role.icon} ${role.persona}`)),
-      theme.fg("dim", formatSubagentPid(source?.provenance.pid)),
-      theme.fg(getSubagentPhaseTone(snapshot, result), getSubagentPhase(snapshot, result)),
-      theme.fg("toolOutput", summarizeExploreCollapsedActivity(snapshot, result)),
-    ].filter(Boolean);
-    return `${line[0]} ${theme.fg("muted", "·")} ${line.slice(1).join(` ${theme.fg("muted", "·")} `)}`;
-  }).join("\n");
+  const totalSearches = details.results.reduce((sum, result) => sum + result.searches, 0);
+  const totalFetches = details.results.reduce((sum, result) => sum + result.fetches, 0);
+  const totalUrls = uniqueUrls(details.results.flatMap((result) => result.citations)).length;
+  const failures = details.results.filter((result) => result.exitCode !== 0).length;
+  const status = details.completed >= details.total
+    ? failures > 0
+      ? theme.fg("error", `${details.completed}/${details.total} done · ${failures} failed`)
+      : theme.fg("success", `${details.completed}/${details.total} done`)
+    : theme.fg("warning", `${details.completed}/${details.total} running`);
+
+  return [
+    status,
+    totalSearches > 0 ? theme.fg("muted", `🔎 ${totalSearches}`) : undefined,
+    totalFetches > 0 ? theme.fg("muted", `🌐 ${totalFetches}`) : undefined,
+    totalUrls > 0 ? theme.fg("muted", `🔗 ${totalUrls}`) : undefined,
+  ].filter(Boolean).join(` ${theme.fg("muted", "·")} `);
 }
 
 function renderExecuteSubagentCollapsedText(
   details: ExecuteSubagentToolDetails,
   theme: { fg: (token: string, text: string) => string; bold: (text: string) => string },
 ): string {
-  return details.roles.map((role) => {
-    const result = details.results.find((entry) => entry.role === role);
-    const snapshot = details.snapshots.find((entry) => entry.role === role);
-    const source = snapshot ?? result;
-    const line = [
-      theme.fg("toolTitle", theme.bold(`${resolveExecuteRole(role).icon} ${role}`)),
-      theme.fg("dim", formatSubagentPid(source?.provenance.pid)),
-      theme.fg(getSubagentPhaseTone(snapshot, result), getSubagentPhase(snapshot, result)),
-      theme.fg("toolOutput", summarizeExecuteCollapsedActivity(snapshot, result)),
-    ].filter(Boolean);
-    return `${line[0]} ${theme.fg("muted", "·")} ${line.slice(1).join(` ${theme.fg("muted", "·")} `)}`;
-  }).join("\n");
+  const failures = details.results.filter((result) => result.exitCode !== 0).length;
+  const status = details.completed >= details.total
+    ? failures > 0
+      ? theme.fg("error", `${details.completed}/${details.total} done · ${failures} failed`)
+      : theme.fg("success", `${details.completed}/${details.total} done`)
+    : theme.fg("warning", `${details.completed}/${details.total} running`);
+  const toolSummary = formatSubagentToolCounts(
+    details.results.reduce<Record<string, number>>((acc, result) => {
+      for (const [tool, count] of Object.entries(result.toolCalls)) {
+        acc[tool] = (acc[tool] ?? 0) + count;
+      }
+      return acc;
+    }, {}),
+    3,
+  );
+
+  return [
+    status,
+    theme.fg("muted", details.roles.join("/")),
+    toolSummary ? theme.fg("muted", toolSummary) : undefined,
+  ].filter(Boolean).join(` ${theme.fg("muted", "·")} `);
 }
 
 function renderExploreSubagentExpandedText(
@@ -1406,19 +1489,27 @@ function renderHarnessSubagentsCollapsedText(
   details: HarnessSubagentsToolDetails,
   theme: { fg: (token: string, text: string) => string; bold: (text: string) => string },
 ): string {
-  return details.subagents.map((subagent) => {
-    const result = details.results.find((entry) => entry.role === subagent.role);
-    const snapshot = details.snapshots.find((entry) => entry.role === subagent.role);
-    const source = snapshot ?? result;
-    const title = `${subagent.icon ? `${subagent.icon} ` : ""}${subagent.role}`;
-    const line = [
-      theme.fg("toolTitle", theme.bold(title)),
-      theme.fg("dim", formatSubagentPid(source?.provenance.pid)),
-      theme.fg(getSubagentPhaseTone(snapshot, result), getSubagentPhase(snapshot, result)),
-      theme.fg("toolOutput", summarizeExecuteCollapsedActivity(snapshot, result)),
-    ].filter(Boolean);
-    return `${line[0]} ${theme.fg("muted", "·")} ${line.slice(1).join(` ${theme.fg("muted", "·")} `)}`;
-  }).join("\n");
+  const failures = details.results.filter((result) => result.exitCode !== 0).length;
+  const status = details.completed >= details.total
+    ? failures > 0
+      ? theme.fg("error", `${details.completed}/${details.total} done · ${failures} failed`)
+      : theme.fg("success", `${details.completed}/${details.total} done`)
+    : theme.fg("warning", `${details.completed}/${details.total} running`);
+  const toolSummary = formatSubagentToolCounts(
+    details.results.reduce<Record<string, number>>((acc, result) => {
+      for (const [tool, count] of Object.entries(result.toolCalls)) {
+        acc[tool] = (acc[tool] ?? 0) + count;
+      }
+      return acc;
+    }, {}),
+    3,
+  );
+
+  return [
+    status,
+    theme.fg("muted", details.subagents.map((subagent) => subagent.role).join(", ")),
+    toolSummary ? theme.fg("muted", toolSummary) : undefined,
+  ].filter(Boolean).join(` ${theme.fg("muted", "·")} `);
 }
 
 function renderHarnessSubagentsExpandedText(
@@ -2053,6 +2144,8 @@ function createExecuteSubagentTotals(): ExecuteSubagentTotals {
 // ─── Extension ────────────────────────────────────────────────────────
 
 export default function (pi: ExtensionAPI) {
+  registerCompactBuiltinToolRenderers(pi);
+
   let state: HarnessState = {
     mode: "off",
     acStatuses: [],
@@ -2658,6 +2751,7 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
       max_results: Type.Optional(Type.Number({ description: "Maximum results to return (default 5, max 10)" })),
       backend: Type.Optional(Type.String({ description: "Optional search backend override: duckduckgo, searxng, or tavily" })),
     }),
+    renderShell: "self",
     async execute(_toolCallId, params, signal) {
       const backend = getSearchBackend(params.backend);
       const maxResults = Math.max(1, Math.min(10, Math.floor(params.max_results ?? 5)));
@@ -2686,6 +2780,21 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
         },
       };
     },
+    renderCall(args, theme, context) {
+      const query = summarizeSubagentText(args.query, MAX_SUBAGENT_CALL_PREVIEW_CHARS) || "...";
+      const backend = args.backend ? getSearchBackend(args.backend) : "auto";
+      return new Text(
+        `${compactToolTitle(theme, context, "search")} ${theme.fg("accent", query)}${theme.fg("muted", ` · ${backend}`)}`,
+        0,
+        0,
+      );
+    },
+    renderResult(result, options, theme, context) {
+      const details = result.details as { results?: unknown[]; backend?: string } | undefined;
+      const count = details?.results?.length ?? 0;
+      const summary = `${count} result${count === 1 ? "" : "s"}${details?.backend ? ` · ${details.backend}` : ""}`;
+      return renderCompactToolResult(result, options, theme, context, summary);
+    },
   });
 
   pi.registerTool({
@@ -2702,6 +2811,7 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
       url: Type.String({ description: "http(s) URL to fetch" }),
       max_chars: Type.Optional(Type.Number({ description: "Maximum characters of extracted text to return (default 12000, max 30000)" })),
     }),
+    renderShell: "self",
     async execute(_toolCallId, params, signal) {
       const url = ensureHttpUrl(params.url);
       const maxChars = Math.max(500, Math.min(30_000, Math.floor(params.max_chars ?? 12_000)));
@@ -2755,6 +2865,17 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
         },
       };
     },
+    renderCall(args, theme, context) {
+      const url = summarizeSubagentText(args.url, MAX_SUBAGENT_CALL_PREVIEW_CHARS) || "...";
+      return new Text(`${compactToolTitle(theme, context, "fetch")} ${theme.fg("accent", url)}`, 0, 0);
+    },
+    renderResult(result, options, theme, context) {
+      const details = result.details as { status?: number; contentType?: string; truncated?: boolean } | undefined;
+      const status = details?.status ? String(details.status) : "fetched";
+      const contentType = details?.contentType ? summarizeSubagentText(details.contentType, 32) : undefined;
+      const summary = [status, contentType, details?.truncated ? "truncated" : undefined].filter(Boolean).join(" · ");
+      return renderCompactToolResult(result, options, theme, context, summary || undefined);
+    },
   });
 
   pi.registerTool({
@@ -2782,6 +2903,7 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
       mode: Type.Optional(Type.String({ description: "Batch mode: 'parallel' (default) or 'sequential'" })),
       context: Type.Optional(Type.String({ description: "Optional shared context appended to default-generated tasks" })),
     }),
+    renderShell: "self",
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       const mode = (params.mode?.trim().toLowerCase() === "sequential" ? "sequential" : "parallel") as "parallel" | "sequential";
       const definitions = normalizeHarnessSubagentDefinitions(params.subject, params.subagents, params.context);
@@ -2865,7 +2987,7 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
         updateUI(ctx);
       }
     },
-    renderCall(args, theme, _context) {
+    renderCall(args, theme, context) {
       const subject = summarizeSubagentText(args.subject, MAX_SUBAGENT_CALL_PREVIEW_CHARS) || "...";
       const mode = typeof args.mode === "string" && args.mode.trim().toLowerCase() === "sequential"
         ? "sequential"
@@ -2876,20 +2998,17 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
           .filter(Boolean)
           .join(", ") || "subagents"
         : "subagents";
-      const text = [
-        theme.fg("toolTitle", theme.bold("subagents ")),
-        theme.fg("accent", subject),
-        theme.fg("muted", ` · ${mode} · ${roles}`),
-      ].join("");
-      return new Text(text, 0, 0);
+      return new Text(
+        `${compactToolTitle(theme, context, "subagents")} ${theme.fg("accent", subject)}${theme.fg("muted", ` · ${mode} · ${roles}`)}`,
+        0,
+        0,
+      );
     },
-    renderResult(result, { expanded, isPartial }, theme, _context) {
+    renderResult(result, { expanded, isPartial }, theme, context) {
       const details = result.details as HarnessSubagentsToolDetails | undefined;
       if (!details) {
-        const textBlock = result.content.find((item) => item.type === "text");
-        const fallback = textBlock?.type === "text" ? textBlock.text : "";
-        if (isPartial) return new Text(theme.fg("warning", "Launching harness subagents..."), 0, 0);
-        return new Text(expanded ? (fallback || "(no output)") : (summarizeSubagentText(fallback, 160) || "(no output)"), 0, 0);
+        const fallback = summarizeSubagentText(extractToolTextContent(result), 160) || undefined;
+        return renderCompactToolResult(result, { expanded }, theme, context, fallback);
       }
 
       return new Text(
@@ -2916,6 +3035,7 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
       topic: Type.String({ description: "Exploration topic or decision question" }),
       project_context: Type.Optional(Type.String({ description: "Optional codebase/project context summary for the subagents" })),
     }),
+    renderShell: "self",
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       const modelSpec = modelToCliSpec(ctx.model as { provider?: string; id?: string } | undefined);
       const thinkingLevel = pi.getThinkingLevel();
@@ -2979,22 +3099,19 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
         updateUI(ctx);
       }
     },
-    renderCall(args, theme, _context) {
+    renderCall(args, theme, context) {
       const topic = summarizeSubagentText(args.topic, MAX_SUBAGENT_CALL_PREVIEW_CHARS) || "...";
-      const text = [
-        theme.fg("toolTitle", theme.bold("explore_subagents ")),
-        theme.fg("accent", topic),
-        theme.fg("muted", " · OPT/PRA/SKP · parallel isolated subprocesses"),
-      ].join("");
-      return new Text(text, 0, 0);
+      return new Text(
+        `${compactToolTitle(theme, context, "explore_subagents")} ${theme.fg("accent", topic)}${theme.fg("muted", " · OPT/PRA/SKP · parallel")}`,
+        0,
+        0,
+      );
     },
-    renderResult(result, { expanded, isPartial }, theme, _context) {
+    renderResult(result, { expanded, isPartial }, theme, context) {
       const details = result.details as ExploreSubagentToolDetails | undefined;
       if (!details) {
-        const textBlock = result.content.find((item) => item.type === "text");
-        const fallback = textBlock?.type === "text" ? textBlock.text : "";
-        if (isPartial) return new Text(theme.fg("warning", "Launching explore subagents..."), 0, 0);
-        return new Text(expanded ? (fallback || "(no output)") : (summarizeSubagentText(fallback, 160) || "(no output)"), 0, 0);
+        const fallback = summarizeSubagentText(extractToolTextContent(result), 160) || undefined;
+        return renderCompactToolResult(result, { expanded }, theme, context, fallback);
       }
 
       return new Text(
@@ -3023,6 +3140,7 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
       mode: Type.Optional(Type.String({ description: "Execution mode: 'sequential' (default) or 'parallel'" })),
       context: Type.Optional(Type.String({ description: "Optional additional context for the role subagents" })),
     }),
+    renderShell: "self",
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       const requestedRoles = (params.roles ?? ["PLN", "IMP", "VER"])
         .map((role) => role.trim().toUpperCase())
@@ -3112,7 +3230,7 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
         updateUI(ctx);
       }
     },
-    renderCall(args, theme, _context) {
+    renderCall(args, theme, context) {
       const objective = summarizeSubagentText(args.objective, MAX_SUBAGENT_CALL_PREVIEW_CHARS) || "...";
       const mode = typeof args.mode === "string" && args.mode.trim().toLowerCase() === "parallel"
         ? "parallel"
@@ -3120,20 +3238,17 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
       const roles = Array.isArray(args.roles) && args.roles.length > 0
         ? args.roles.map((role) => String(role).trim().toUpperCase()).filter(Boolean).join("/")
         : "PLN/IMP/VER";
-      const text = [
-        theme.fg("toolTitle", theme.bold("execute_subagents ")),
-        theme.fg("accent", objective),
-        theme.fg("muted", ` · ${mode} · ${roles}`),
-      ].join("");
-      return new Text(text, 0, 0);
+      return new Text(
+        `${compactToolTitle(theme, context, "execute_subagents")} ${theme.fg("accent", objective)}${theme.fg("muted", ` · ${mode} · ${roles}`)}`,
+        0,
+        0,
+      );
     },
-    renderResult(result, { expanded, isPartial }, theme, _context) {
+    renderResult(result, { expanded, isPartial }, theme, context) {
       const details = result.details as ExecuteSubagentToolDetails | undefined;
       if (!details) {
-        const textBlock = result.content.find((item) => item.type === "text");
-        const fallback = textBlock?.type === "text" ? textBlock.text : "";
-        if (isPartial) return new Text(theme.fg("warning", "Launching execute subagents..."), 0, 0);
-        return new Text(expanded ? (fallback || "(no output)") : (summarizeSubagentText(fallback, 160) || "(no output)"), 0, 0);
+        const fallback = summarizeSubagentText(extractToolTextContent(result), 160) || undefined;
+        return renderCompactToolResult(result, { expanded }, theme, context, fallback);
       }
 
       return new Text(
@@ -3168,6 +3283,7 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
       description: Type.String({ description: "Human-readable explanation of what's being checked and how" }),
       increment: Type.Optional(Type.String({ description: "Current increment, e.g. 'INC-1'" })),
     }),
+    renderShell: "self",
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       if (state.mode !== "execute") {
         throw new Error("harness_verify_register is only available in execute mode.");
@@ -3203,6 +3319,20 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
         details: { ac_id: params.ac_id, isUpdate, totalEntries: count },
       };
     },
+    renderCall(args, theme, context) {
+      return new Text(
+        `${compactToolTitle(theme, context, "verify_register")} ${theme.fg("accent", args.ac_id)}${theme.fg("muted", ` · ${args.strategy}`)}`,
+        0,
+        0,
+      );
+    },
+    renderResult(result, options, theme, context) {
+      const details = result.details as { isUpdate?: boolean; totalEntries?: number } | undefined;
+      const summary = details
+        ? `${details.isUpdate ? "updated" : "registered"} · ${details.totalEntries ?? 0} entries`
+        : undefined;
+      return renderCompactToolResult(result, options, theme, context, summary);
+    },
   });
 
   pi.registerTool({
@@ -3217,6 +3347,7 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
     parameters: Type.Object({
       filter: Type.Optional(Type.String({ description: "Filter entries by AC ID prefix, e.g. 'AC-1'" })),
     }),
+    renderShell: "self",
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       if (state.mode !== "execute") {
         throw new Error("harness_verify_list is only available in execute mode.");
@@ -3268,6 +3399,19 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
         },
       };
     },
+    renderCall(args, theme, context) {
+      const filter = typeof args.filter === "string" && args.filter.trim()
+        ? theme.fg("muted", ` · ${args.filter.trim()}`)
+        : "";
+      return new Text(`${compactToolTitle(theme, context, "verify_list")}${filter}`, 0, 0);
+    },
+    renderResult(result, options, theme, context) {
+      const details = result.details as { entries?: unknown[]; totalEntries?: number } | undefined;
+      const visible = details?.entries?.length ?? 0;
+      const total = details?.totalEntries ?? visible;
+      const summary = `${visible} shown${visible !== total ? ` · ${total} total` : ""}`;
+      return renderCompactToolResult(result, options, theme, context, summary);
+    },
   });
 
   // ── Commit & push tool (VER calls after verification) ─────────────
@@ -3285,6 +3429,7 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
       increment: Type.String({ description: "Increment ID, e.g. 'INC-1'" }),
       message: Type.String({ description: "Brief description of changes in this increment" }),
     }),
+    renderShell: "self",
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       if (state.mode !== "execute") {
         throw new Error("harness_commit is only available in execute mode. Use /execute first.");
@@ -3353,6 +3498,20 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
           pushError: pushed ? undefined : pushResult.stderr.trim(),
         },
       };
+    },
+    renderCall(args, theme, context) {
+      const message = summarizeSubagentText(args.message, 48);
+      const suffix = message ? theme.fg("muted", ` · ${message}`) : "";
+      return new Text(`${compactToolTitle(theme, context, "commit")} ${theme.fg("accent", args.increment)}${suffix}`, 0, 0);
+    },
+    renderResult(result, options, theme, context) {
+      const details = result.details as { hash?: string; pushed?: boolean; increment?: string; skipped?: boolean } | undefined;
+      const summary = details?.skipped
+        ? "no staged changes"
+        : details?.hash
+          ? `${details.hash}${details.pushed ? " · pushed" : " · commit only"}`
+          : undefined;
+      return renderCompactToolResult(result, options, theme, context, summary);
     },
   });
 
