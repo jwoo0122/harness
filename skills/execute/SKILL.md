@@ -10,7 +10,7 @@ You are now in **convergent mode** with a **three-role agent system**.
 
 Arguments: $ARGUMENTS — path to criteria/requirements file, or milestone name. If blank, look for the most recent criteria/requirements document in the project.
 
-> **Harness note:** This skill is project-agnostic. When running inside pi with the `@jwoo0122/harness` extension, AC status is persisted across sessions, the parent `/execute` agent becomes an orchestrator, and real isolated PLN / IMP / VER subagents can be invoked instead of role-playing those functions in one context.
+> **Harness note:** This skill is project-agnostic. When running inside pi with the `@jwoo0122/harness` extension, AC status is persisted across sessions, the parent `/execute` agent becomes an orchestrator, and real isolated subagents should be invoked through the generic `harness_subagents` tool instead of role-playing every function in one context. PLN / IMP / VER are injected by this skill as role-specific subagent configurations.
 
 ---
 
@@ -161,7 +161,7 @@ PLN reviews:
 
 ### Phase 1 — Increment Planning (PLN leads)
 
-In pi with the harness extension, prefer invoking a real isolated PLN subagent (and then IMP / VER review subagents) instead of simulating all three roles in one response.
+In pi with the harness extension, prefer invoking `harness_subagents` in sequential mode with PLN first (then IMP / VER review subagents) instead of simulating all three roles in one response.
 
 **PLN** reads the criteria, decomposes into micro-increments.
 
@@ -197,7 +197,7 @@ PLN revises until both approve.
 
 #### 2a. IMP implements
 
-In pi with the harness extension, prefer invoking an isolated IMP subagent for code changes, followed by an isolated VER subagent for gate checks and verification.
+In pi with the harness extension, prefer invoking `harness_subagents` with an IMP-configured subagent for code changes, followed by a VER-configured subagent for gate checks and verification.
 
 ```markdown
 🔨 IMP: INC-[N]

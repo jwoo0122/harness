@@ -1,135 +1,214 @@
 # @jwoo0122/harness
 
-Two-mode cognitive harness for AI coding agents — structured thinking protocols that eliminate self-affirmation bias.
+Two-mode cognitive harness for AI coding agents — divergent exploration, convergent execution, and a generic isolated-subagent runtime that powers both.
 
 ## What this is
 
-A pi package that provides two complementary thinking modes:
+`@jwoo0122/harness` is a pi package with two protocol-level skills:
 
-| Mode | Skill | Personas/Roles | Purpose |
-|------|-------|----------------|---------|
-| **Explore** | `/explore` | 🔴 Optimist · 🟡 Pragmatist · 🟢 Skeptic | Divergent thinking — push boundaries, find options |
-| **Execute** | `/execute` | 📋 Planner · 🔨 Implementer · ✅ Verifier | Convergent building — ship correct code, suppress regressions |
+| Mode | Skill | Personas / Roles | Purpose |
+|------|-------|------------------|---------|
+| **Explore** | `/explore` | 🔴 Optimist · 🟡 Pragmatist · 🟢 Skeptic | Divergent thinking — expand the space, surface options, force debate |
+| **Execute** | `/execute` | 📋 Planner · 🔨 Implementer · ✅ Verifier | Convergent delivery — ship in increments, verify rigorously |
 
-### Why sub-agents?
+The important architectural change is this:
 
-Single-agent systems suffer from **self-affirmation bias** — the same brain that writes code also evaluates whether that code is correct. The harness forces structured role separation:
+- **`/explore` and `/execute` are domain protocols**.
+- **`harness_subagents` is the generic runtime primitive**.
+- Personas like `OPT / PRA / SKP` or roles like `PLN / IMP / VER` are **injected at call time** through per-subagent prompts, tool policies, and sequencing.
 
-- In **Explore**: three emotional lenses debate. In pi, these can run as **real isolated subagents** before synthesis. No unanimous agreement allowed in Round 1. Unsupported claims are struck from the record.
-- In **Execute**: three professional roles check each other. In pi, PLN / IMP / VER can run as **real isolated subagents** and the parent execute agent becomes an orchestrator. The Implementer cannot mark their own acceptance criteria as passed — only the Verifier can. The Verifier cannot write code. The Planner cannot run tests.
+That keeps the subprocess runtime generic while letting skills define the mental model.
+
+## Why isolated subagents
+
+Single-agent systems suffer from **self-affirmation bias** — the same context that proposes a plan also tends to approve it.
+
+Harness counters that by separating:
+- the **protocol** layer (`/explore`, `/execute`), and
+- the **runtime** layer (`harness_subagents`).
+
+Examples:
+- In **Explore**, the extension can launch three real isolated subagents configured as OPT / PRA / SKP before synthesis.
+- In **Execute**, the extension can launch real isolated subagents configured as PLN → IMP → VER so scope, implementation, and verification stay separated.
 
 ## Installation
 
-### In pi (full power — enforcement + TUI)
+### In pi
 
 ```bash
 pi install git:github.com/jwoo0122/harness
 ```
 
+Or for local development:
+
+```bash
+pi install /absolute/path/to/harness
+```
+
 This gives you:
 - `/explore` and `/execute` commands with mode switching
-- **Real explore subagents**: isolated OPT / PRA / SKP `pi` subprocesses launched in parallel before synthesis
-- **Real execute subagents**: isolated PLN / IMP / VER `pi` subprocesses for planning, implementation, and verification
-- **Tool enforcement**: write/edit/build blocked in explore mode, and main `/execute` runs as orchestration-only
-- **External evidence gate**: structured web search/fetch required for ecosystem claims
-- **TUI widgets**: mode indicator in footer, AC status dashboard
-- **State persistence**: AC tracking survives session restarts
-- **Keyboard shortcut**: `Ctrl+Shift+H` to cycle modes
-- **Prompt templates**: `/debate <topic>`, `/ac-check <criteria>`
+- `harness_subagents` — generic isolated subprocess orchestration
+- compatibility aliases: `harness_explore_subagents`, `harness_execute_subagents` (deprecated for new usage)
+- tool enforcement for explore / execute parent modes
+- structured web evidence tools for auditable external research
+- verification registry tools for cumulative AC verification
+- footer status for current mode and counters
+- **live subagent widget only while a subagent batch is running**
+- state persistence across session restarts
+- prompt templates: `/debate`, `/ac-check`
+- keyboard shortcut: `Ctrl+Shift+H`
 
-### In Claude Code / other harnesses (skills only)
+### In Claude Code / other harnesses
 
-Copy the `skills/` directory to your project's `.claude/skills/` (or equivalent):
+Copy the `skills/` directory into your project skill directory:
 
 ```bash
 cp -r skills/explore skills/execute /path/to/project/.claude/skills/
 ```
 
-Or install via npm:
+If you publish the package to npm, the same skills can also be consumed that way:
+
 ```bash
 npm install @jwoo0122/harness
 ```
 
-The skills work standalone as pure Markdown protocols — no extension needed. You lose tool enforcement, TUI feedback, and state persistence, but the core debate and verification protocols function in any LLM coding agent.
+The Markdown skills work standalone without the pi extension. You lose enforcement, live UI, and persistent state, but the debate / verification protocols still work.
 
 ## Usage
 
 ### Explore mode
 
-```
+```text
 /explore "Should we use an ECS architecture for the scene graph?"
 ```
 
-The agent will:
-1. Gather project context (read-only)
-2. Run isolated OPT / PRA / SKP subagents in parallel for first-pass positions
-3. Research broadly across the ecosystem with explicit external citations
-4. Run a 3-round debate with cross-examination
-5. Produce a synthesis document at `target/explore/`
+Expected runtime shape inside pi:
+1. gather read-only local context
+2. call `harness_subagents` with **OPT / PRA / SKP** in **parallel**
+3. research external evidence with `harness_web_search` / `harness_web_fetch`
+4. run the 3-round debate
+5. write the synthesis document to `target/explore/`
 
 ### Execute mode
 
-```
+```text
 /execute .iteration-4-criteria.md
 ```
 
-The agent will:
-1. Orchestrate isolated PLN / IMP / VER subagents instead of collapsing roles into one context
-2. Run pre-flight baseline checks
-3. Decompose criteria into micro-increments (≤3 files each)
-4. For each increment: implement → gate check → verify → AC checkpoint → regression scan
-5. Produce an execution report at `target/execute/`
+Expected runtime shape inside pi:
+1. parent `/execute` stays orchestration-only
+2. call `harness_subagents` with **PLN → IMP → VER** in **sequential** mode
+3. run gates and verification
+4. update the verification registry
+5. produce the execution report at `target/execute/`
 
-### Quick templates
+### Generic subagent runtime
 
+The extension-level primitive is `harness_subagents`.
+
+Conceptually:
+
+```ts
+harness_subagents({
+  subject: "decision or objective",
+  mode: "parallel" | "sequential",
+  context: "optional shared context",
+  subagents: [
+    {
+      role: "OPT",
+      label: "Optimist",
+      icon: "🔴",
+      system_prompt: "define the persona / role here",
+      task: "optional explicit task override",
+      active_tools: ["read", "grep", "find", "ls", "harness_web_search", "harness_web_fetch"],
+      bash_policy: "read-only"
+    }
+  ]
+})
 ```
-/debate "atlas vs per-texture GPU upload"     # One-off debate without full explore
-/ac-check .iteration-4-criteria.md            # VER-only AC verification pass
-```
 
-### Keyboard shortcut
+Use:
+- **parallel** for independent perspectives
+- **sequential** when later subagents must react to earlier outputs
 
-`Ctrl+Shift+H` cycles: off → explore → execute → off
+## Prompt templates
+
+This package ships two prompt templates:
+
+- `/debate <topic>` — focused explore-style debate prompt
+- `/ac-check <criteria>` — VER-focused acceptance-criteria check prompt
 
 ## Package structure
 
-```
+```text
 harness/
-├── package.json              # pi package manifest
+├── package.json
+├── CHANGELOG.md
+├── INTEGRATION.md
+├── README.md
 ├── extensions/
-│   ├── index.ts              # Mode management, tool enforcement, TUI, state
-│   └── subagents.ts          # Shared subprocess subagent runtime for explore + execute
-├── skills/
-│   ├── explore/SKILL.md      # 3-persona debate protocol (works standalone)
-│   └── execute/SKILL.md      # 3-role verification protocol (works standalone)
-└── prompts/
-    ├── debate.md             # Quick single-topic debate
-    └── ac-check.md           # VER-only AC check
+│   ├── index.ts          # mode management, gating, tools, registry, status UI
+│   └── subagents.ts      # generic isolated subprocess runtime
+├── prompts/
+│   ├── debate.md
+│   └── ac-check.md
+└── skills/
+    ├── explore/SKILL.md
+    └── execute/SKILL.md
 ```
 
-## Design decisions
+## Design notes
 
-### Skills are self-contained
-Each SKILL.md works without the extension. The extension adds enforcement — it doesn't change the protocol. This means the same skills can be used in Claude Code, Codex, or any agent that supports the [Agent Skills standard](https://agentskills.io).
+### 1. Skills are self-contained
 
-### Extension adds five layers
-1. **Tool gating** — explore mode blocks write/edit/build, and main execute mode blocks direct implementation commands in favor of role delegation
-2. **Isolated subagents** — `/explore` and `/execute` can invoke real subprocess agents with role-specific tool policies
-3. **Verification registry plumbing** — execute mode exposes `harness_verify_register` and `harness_verify_list`, persisting reproducible AC verification methods in `.harness/verification-registry.json`
-4. **State tracking** — AC statuses persist in the session via `appendEntry`
-5. **TUI feedback** — footer status + widget show current mode, AC progress
+Each `SKILL.md` works without the extension. The extension adds enforcement and orchestration; it does not redefine the underlying protocol.
 
-### Verification registry smoke path
-For a smoke-level execute increment, VER should be able to:
-1. run baseline checks,
-2. load or create `.harness/verification-registry.json`,
-3. register a passing AC with `harness_verify_register`, and
-4. list cumulative entries with `harness_verify_list` before regression checks.
+### 2. The runtime is generic
 
-This package ships the registry plumbing and workflow guidance. Project-specific repos still provide the actual verification commands that VER records and re-runs.
+`harness_subagents` does not hardcode “explore” or “execute”.
+The meaning comes from the injected prompts, tool lists, and sequencing.
 
-### No project-specific assumptions
-The skills reference generic concepts ("formatter check", "linter", "test suite") rather than specific tools. They adapt to any tech stack.
+### 3. Compatibility aliases remain temporarily
+
+For backward compatibility, the package still exposes:
+- `harness_explore_subagents`
+- `harness_execute_subagents`
+
+New integrations should prefer `harness_subagents`.
+
+### 4. TUI behavior is now simpler
+
+- footer status shows mode-level state
+- widget UI appears **only during an active subagent batch**
+- there is no always-on mode dashboard widget anymore
+
+### 5. Verification registry stays cumulative
+
+Execute mode persists reproducible AC verification methods in:
+
+```text
+.harness/verification-registry.json
+```
+
+VER records:
+- strategy
+- exact command
+- relevant files
+- human-readable description
+
+Then future regression scans can re-run the same checks.
+
+## Verification registry smoke path
+
+A smoke-level execute increment should be able to:
+1. load or create `.harness/verification-registry.json`
+2. register a passing AC via `harness_verify_register`
+3. list cumulative entries with `harness_verify_list`
+4. re-run registered verifications during regression scanning
+
+## Development workflow
+
+When installed from a **local path**, pi reads the package directly from disk. After editing the package, use `/reload` in pi to pick up changes immediately.
 
 ## License
 

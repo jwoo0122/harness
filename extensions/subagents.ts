@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { basename } from "node:path";
 
-export type HarnessMode = "explore" | "execute";
+export type HarnessMode = "generic" | "explore" | "execute";
 export type SubagentBashPolicy = "none" | "read-only" | "verify" | "implement";
 export type SubagentBatchMode = "parallel" | "sequential";
 export type HarnessSubagentLivePhase = "starting" | "running" | "tool_running" | "completed" | "failed";

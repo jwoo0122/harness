@@ -96,7 +96,8 @@ interface PersistedSubagentRunRecord {
 interface PersistedSubagentBatchRecord {
   schema: "harness-subagent-record/v1";
   toolCallId: string;
-  mode: "explore" | "execute";
+  mode: "generic" | "explore" | "execute";
+  subject?: string;
   topic?: string;
   objective?: string;
   executionMode?: "parallel" | "sequential";
@@ -147,6 +148,43 @@ interface ExecuteSubagentToolDetails {
   record?: PersistedSubagentBatchRecordLink;
 }
 
+interface HarnessSubagentConfigInput {
+  role: string;
+  label?: string;
+  icon?: string;
+  task?: string;
+  system_prompt: string;
+  active_tools?: string[];
+  bash_policy?: string;
+}
+
+interface HarnessSubagentDefinition {
+  role: string;
+  label: string;
+  icon?: string;
+  task: string;
+  systemPrompt: string;
+  activeTools: string[];
+  bashPolicy: SubagentBashPolicy;
+}
+
+interface HarnessSubagentsResult extends HarnessSubagentRunResult<string> {
+  subject: string;
+  searches: number;
+  fetches: number;
+}
+
+interface HarnessSubagentsToolDetails {
+  subject: string;
+  mode: "parallel" | "sequential";
+  completed: number;
+  total: number;
+  subagents: Array<Pick<HarnessSubagentDefinition, "role" | "label" | "icon">>;
+  results: HarnessSubagentsResult[];
+  snapshots: HarnessSubagentSnapshot<string>[];
+  record?: PersistedSubagentBatchRecordLink;
+}
+
 interface ExecuteSubagentTotals {
   subagentRuns: number;
   roleRuns: Record<ExecuteRole, number>;
@@ -166,6 +204,15 @@ interface ExecuteLiveBatchState {
   total: number;
   roles: ExecuteRole[];
   snapshots: HarnessSubagentSnapshot<ExecuteRole>[];
+}
+
+interface HarnessLiveBatchState {
+  subject: string;
+  mode: "parallel" | "sequential";
+  completed: number;
+  total: number;
+  subagents: Array<Pick<HarnessSubagentDefinition, "role" | "label" | "icon">>;
+  snapshots: HarnessSubagentSnapshot<string>[];
 }
 
 interface WebSearchResult {
@@ -200,7 +247,6 @@ const REGISTRY_DIR = ".harness";
 const REGISTRY_FILE = "verification-registry.json";
 const CURRENT_EXTENSION_PATH = fileURLToPath(import.meta.url);
 const IS_SUBAGENT_CHILD = process.env.HARNESS_SUBAGENT_CHILD === "1";
-const CHILD_SUBAGENT_MODE = process.env.HARNESS_SUBAGENT_MODE as Mode | undefined;
 const CHILD_SUBAGENT_ROLE = process.env.HARNESS_SUBAGENT_ROLE ?? "";
 const CHILD_SUBAGENT_TOOLS = (process.env.HARNESS_SUBAGENT_TOOLS ?? "")
   .split(",")
@@ -215,6 +261,7 @@ const SAFE_EXPLORE_TOOL_NAMES = new Set([
   "ls",
   "harness_web_search",
   "harness_web_fetch",
+  "harness_subagents",
   "harness_explore_subagents",
 ]);
 const SAFE_EXECUTE_TOOL_NAMES = new Set([
@@ -224,6 +271,7 @@ const SAFE_EXECUTE_TOOL_NAMES = new Set([
   "ls",
   "harness_web_search",
   "harness_web_fetch",
+  "harness_subagents",
   "harness_execute_subagents",
   "harness_verify_register",
   "harness_verify_list",
@@ -701,6 +749,158 @@ function buildExecuteRoleTask(
   ].filter(Boolean).join("\n");
 }
 
+function buildHarnessSubagentSystemPrompt(subagent: Pick<HarnessSubagentDefinition, "role" | "label" | "systemPrompt">): string {
+  return [
+    "[HARNESS SUBAGENT]",
+    `You are ${subagent.role}${subagent.label && subagent.label !== subagent.role ? ` (${subagent.label})` : ""} in an isolated harness subagent subprocess.`,
+    subagent.systemPrompt,
+    "",
+    "Operating rules:",
+    "- You are a real isolated subagent, not a role-played paragraph in the parent context.",
+    "- Stay inside the persona, role, or evaluation lens defined above.",
+    "- Use only the tools enabled for this subagent.",
+    "- If evidence is missing, say so explicitly.",
+    "- Return concise markdown unless the task requires another structured format.",
+  ].join("\n");
+}
+
+function buildHarnessSubagentTask(
+  subject: string,
+  subagent: Pick<HarnessSubagentConfigInput, "task">,
+  context?: string,
+): string {
+  if (subagent.task?.trim()) return subagent.task.trim();
+
+  return [
+    "[HARNESS SUBAGENT TASK]",
+    `Subject: ${subject}`,
+    context ? `Context: ${context}` : "",
+    "",
+    "Stay in role. Use tools only if needed. Return concise markdown.",
+  ].filter(Boolean).join("\n");
+}
+
+function parseHarnessSubagentBashPolicy(
+  value: string | undefined,
+  activeTools: string[],
+): SubagentBashPolicy {
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === "none" || normalized === "read-only" || normalized === "verify" || normalized === "implement") {
+    return normalized;
+  }
+
+  return activeTools.includes("bash") ? "read-only" : "none";
+}
+
+function normalizeHarnessSubagentDefinitions(
+  subject: string,
+  subagents: HarnessSubagentConfigInput[],
+  context?: string,
+): HarnessSubagentDefinition[] {
+  return subagents.flatMap((subagent) => {
+    const role = subagent.role.trim();
+    const systemPromptBody = subagent.system_prompt.trim();
+    if (!role || !systemPromptBody) return [];
+
+    const label = subagent.label?.trim() || role;
+    const icon = subagent.icon?.trim() || undefined;
+    const activeTools = (subagent.active_tools ?? ["read", "grep", "find", "ls"])
+      .map((tool) => tool.trim())
+      .filter(Boolean);
+
+    return [{
+      role,
+      label,
+      icon,
+      task: buildHarnessSubagentTask(subject, subagent, context),
+      systemPrompt: buildHarnessSubagentSystemPrompt({
+        role,
+        label,
+        systemPrompt: systemPromptBody,
+      }),
+      activeTools,
+      bashPolicy: parseHarnessSubagentBashPolicy(subagent.bash_policy, activeTools),
+    }];
+  });
+}
+
+function mapHarnessSubagentsRunResult(
+  subject: string,
+  result: HarnessSubagentRunResult<string>,
+): HarnessSubagentsResult {
+  return {
+    ...result,
+    subject,
+    searches: result.toolCalls.harness_web_search ?? 0,
+    fetches: result.toolCalls.harness_web_fetch ?? 0,
+  };
+}
+
+function buildHarnessSubagentsDetails(
+  subject: string,
+  mode: "parallel" | "sequential",
+  subagents: Array<Pick<HarnessSubagentDefinition, "role" | "label" | "icon">>,
+  completed: number,
+  total: number,
+  results: HarnessSubagentRunResult<string>[],
+  snapshots: HarnessSubagentSnapshot<string>[],
+): HarnessSubagentsToolDetails {
+  return {
+    subject,
+    mode,
+    completed,
+    total,
+    subagents,
+    results: results.map((result) => mapHarnessSubagentsRunResult(subject, result)),
+    snapshots,
+  };
+}
+
+function summarizeHarnessSubagentsProgress(details: HarnessSubagentsToolDetails): string {
+  const completedLabels = details.results.map((result) => result.role).join(", ") || "none";
+  return `Running harness subagents for \"${details.subject}\" — ${details.completed}/${details.total} complete (${completedLabels})`;
+}
+
+function formatHarnessSubagentsResults(details: HarnessSubagentsToolDetails): string {
+  const totalSearches = details.results.reduce((sum, result) => sum + result.searches, 0);
+  const totalFetches = details.results.reduce((sum, result) => sum + result.fetches, 0);
+  const totalUrls = uniqueUrls(details.results.flatMap((result) => result.citations)).length;
+
+  const lines: string[] = [];
+  lines.push(`Harness subagents completed for: ${details.subject}`);
+  lines.push(`Mode: ${details.mode} | Subagents: ${details.subagents.map((subagent) => subagent.role).join(", ")}`);
+  lines.push(`Coverage: ${details.results.length}/${details.total} | 🔎 ${totalSearches} searches | 🌐 ${totalFetches} fetches | 🔗 ${totalUrls} URLs`);
+  lines.push("");
+
+  for (const subagent of details.subagents) {
+    const result = details.results.find((entry) => entry.role === subagent.role);
+    lines.push(`## ${subagent.label}${subagent.label !== subagent.role ? ` (${subagent.role})` : ""}`);
+    if (!result) {
+      lines.push("[No assistant output captured]");
+      lines.push("");
+      continue;
+    }
+    lines.push(`Exit: ${result.exitCode === 0 ? "success" : `error ${result.exitCode}`}`);
+    lines.push(`Evidence: 🔎 ${result.searches} | 🌐 ${result.fetches} | 🔗 ${result.citations.length}`);
+    const toolSummary = Object.entries(result.toolCalls)
+      .map(([tool, count]) => `${tool}×${count}`)
+      .join(", ");
+    if (toolSummary) lines.push(`Tools: ${toolSummary}`);
+    if (result.model) lines.push(`Model: ${result.model}`);
+    if (result.citations.length > 0) lines.push(`Citations: ${result.citations.join(", ")}`);
+    lines.push("");
+    lines.push(result.output || "[No assistant output captured]");
+    if (result.stderr.trim()) {
+      lines.push("");
+      lines.push(`stderr: ${result.stderr.trim()}`);
+    }
+    lines.push("");
+  }
+
+  lines.push("Use these isolated subagent outputs as first-class evidence-backed perspectives for the current task.");
+  return lines.join("\n");
+}
+
 function resolveExplorePersona(persona: ExplorePersona) {
   return EXPLORE_SUBAGENT_ROLES.find((entry) => entry.persona === persona)!;
 }
@@ -760,6 +960,20 @@ function formatLiveExecuteBatchStatus(batch: ExecuteLiveBatchState): string {
   const segments = batch.roles.map((role) => {
     const spec = resolveExecuteRole(role);
     return `${spec.icon}${role} ${describeLiveSubagent(snapshotsByRole.get(role))}`;
+  });
+
+  return `🤖 ${batch.completed}/${batch.total} · ${segments.join(" · ")}`;
+}
+
+function formatLiveHarnessBatchStatus(batch: HarnessLiveBatchState): string {
+  const snapshotsByRole = new Map<string, HarnessSubagentSnapshot<string>>();
+  for (const snapshot of batch.snapshots) {
+    snapshotsByRole.set(snapshot.role, snapshot);
+  }
+
+  const segments = batch.subagents.map((subagent) => {
+    const prefix = subagent.icon ? `${subagent.icon} ` : "";
+    return `${prefix}${subagent.role} ${describeLiveSubagent(snapshotsByRole.get(subagent.role))}`;
   });
 
   return `🤖 ${batch.completed}/${batch.total} · ${segments.join(" · ")}`;
@@ -935,8 +1149,8 @@ function summarizeExploreCollapsedActivity(
 }
 
 function summarizeExecuteCollapsedActivity(
-  snapshot: HarnessSubagentSnapshot<ExecuteRole> | undefined,
-  result: ExecuteSubagentResult | undefined,
+  snapshot: HarnessSubagentSnapshot<string> | undefined,
+  result: HarnessSubagentRunResult<string> | undefined,
 ): string {
   if (!result) return describeSubagentLiveActivity(snapshot);
   if (snapshot && ["starting", "running", "tool_running"].includes(snapshot.livePhase)) {
@@ -1188,6 +1402,72 @@ function renderExecuteSubagentExpandedText(
   return lines.join("\n");
 }
 
+function renderHarnessSubagentsCollapsedText(
+  details: HarnessSubagentsToolDetails,
+  theme: { fg: (token: string, text: string) => string; bold: (text: string) => string },
+): string {
+  return details.subagents.map((subagent) => {
+    const result = details.results.find((entry) => entry.role === subagent.role);
+    const snapshot = details.snapshots.find((entry) => entry.role === subagent.role);
+    const source = snapshot ?? result;
+    const title = `${subagent.icon ? `${subagent.icon} ` : ""}${subagent.role}`;
+    const line = [
+      theme.fg("toolTitle", theme.bold(title)),
+      theme.fg("dim", formatSubagentPid(source?.provenance.pid)),
+      theme.fg(getSubagentPhaseTone(snapshot, result), getSubagentPhase(snapshot, result)),
+      theme.fg("toolOutput", summarizeExecuteCollapsedActivity(snapshot, result)),
+    ].filter(Boolean);
+    return `${line[0]} ${theme.fg("muted", "·")} ${line.slice(1).join(` ${theme.fg("muted", "·")} `)}`;
+  }).join("\n");
+}
+
+function renderHarnessSubagentsExpandedText(
+  details: HarnessSubagentsToolDetails,
+  isPartial: boolean,
+  theme: { fg: (token: string, text: string) => string; bold: (text: string) => string },
+): string {
+  const lines: string[] = [];
+  lines.push(theme.fg("toolTitle", theme.bold(`Subject: ${details.subject}`)));
+  lines.push(theme.fg("muted", `Mode: ${details.mode} · ${details.completed}/${details.total} subagents complete${isPartial ? " · live" : ""}`));
+
+  for (const subagent of details.subagents) {
+    const result = details.results.find((entry) => entry.role === subagent.role);
+    const snapshot = details.snapshots.find((entry) => entry.role === subagent.role);
+    const source = snapshot ?? result;
+    const phase = getSubagentPhase(snapshot, result);
+    const phaseTone = getSubagentPhaseTone(snapshot, result);
+    const toolSummary = result ? formatSubagentToolCounts(result.toolCalls) : "";
+    const isolationFlags = source ? extractSubagentIsolationFlags(source.provenance.args) : [];
+    const title = `${subagent.icon ? `${subagent.icon} ` : ""}${subagent.label}${subagent.label !== subagent.role ? ` (${subagent.role})` : ""}`;
+
+    lines.push("");
+    lines.push(theme.fg("toolTitle", theme.bold(title)));
+    lines.push(`  ${theme.fg("muted", "PID:")} ${theme.fg("dim", String(source?.provenance.pid ?? "—"))}`);
+    lines.push(`  ${theme.fg("muted", "Phase:")} ${theme.fg(phaseTone, phase)}${result ? theme.fg("dim", ` · exit ${result.exitCode}`) : ""}`);
+    if (source?.model) lines.push(`  ${theme.fg("muted", "Model:")} ${theme.fg("dim", source.model)}`);
+    if (source?.provenance.cwd) lines.push(`  ${theme.fg("muted", "CWD:")} ${theme.fg("dim", source.provenance.cwd)}`);
+    if (source) lines.push(`  ${theme.fg("muted", "Invocation:")} ${theme.fg("dim", summarizeSubagentInvocation(source.provenance))}`);
+    if (isolationFlags.length > 0) lines.push(`  ${theme.fg("muted", "Isolation:")} ${theme.fg("dim", isolationFlags.join(", "))}`);
+    if (source?.provenance.startedAt || source?.provenance.endedAt) {
+      lines.push(`  ${theme.fg("muted", "Lifetime:")} ${theme.fg("dim", `${source.provenance.startedAt ?? "?"} → ${source.provenance.endedAt ?? "running"}`)}`);
+    }
+    if (result) {
+      lines.push(`  ${theme.fg("muted", "Evidence:")} ${theme.fg("dim", `search×${result.searches}, fetch×${result.fetches}, citations×${result.citations.length}`)}`);
+      lines.push(`  ${theme.fg("muted", "Tools:")} ${theme.fg("dim", toolSummary || "none")}`);
+      lines.push(`  ${theme.fg("muted", "Citations:")} ${theme.fg("dim", formatSubagentCitationPreview(result.citations))}`);
+    }
+    lines.push(`  ${theme.fg("muted", "Recent stream:")}`);
+    lines.push(...renderSubagentRecentStreamLines(source, theme));
+    lines.push(`  ${theme.fg("muted", "Output preview:")}`);
+    lines.push(...renderSubagentPreviewLines(result?.output ?? source?.assistantPreview, theme));
+    if (result?.stderr.trim()) {
+      lines.push(`  ${theme.fg("muted", "stderr:")} ${theme.fg("error", summarizeSubagentText(result.stderr, MAX_SUBAGENT_STDERR_PREVIEW_CHARS))}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
 function mapExploreRunResult(topic: string, result: HarnessSubagentRunResult<ExplorePersona>): ExploreSubagentResult {
   return {
     ...result,
@@ -1386,13 +1666,55 @@ function buildExecuteSubagentRecord(
   };
 }
 
+function buildHarnessSubagentsRecord(
+  toolCallId: string,
+  details: HarnessSubagentsToolDetails,
+  batchStartedAt: string,
+  batchEndedAt: string,
+): PersistedSubagentBatchRecord {
+  const toolCalls = mergeToolCallCounts(details.results);
+  const searches = details.results.reduce((sum, result) => sum + result.searches, 0);
+  const fetches = details.results.reduce((sum, result) => sum + result.fetches, 0);
+
+  return {
+    schema: "harness-subagent-record/v1",
+    toolCallId,
+    mode: "generic",
+    subject: details.subject,
+    executionMode: details.mode,
+    batch: {
+      startedAt: batchStartedAt,
+      endedAt: batchEndedAt,
+      durationMs: getElapsedMs(batchStartedAt, batchEndedAt) ?? 0,
+      completed: details.completed,
+      total: details.total,
+      exitStatus: getSubagentBatchExitStatus(details.results),
+    },
+    totals: {
+      citationsCount: uniqueUrls(details.results.flatMap((result) => result.citations)).length,
+      evidence: {
+        searches,
+        fetches,
+      },
+      toolCalls: {
+        total: sumToolCallMap(toolCalls),
+        byTool: toolCalls,
+      },
+    },
+    subagents: details.results.map((result) => buildPersistedSubagentRunRecord(result, {
+      searches: result.searches,
+      fetches: result.fetches,
+    })),
+  };
+}
+
 function formatPersistedSubagentRecordSummary(record: PersistedSubagentBatchRecord): string {
   const subject = summarizeSubagentText(
-    record.mode === "explore" ? record.topic : record.objective,
+    record.subject ?? record.topic ?? record.objective,
     72,
   ) || `${record.mode} batch`;
-  const evidenceSummary = record.mode === "explore"
-    ? ` | 🔎${record.totals.evidence?.searches ?? 0} | 🌐${record.totals.evidence?.fetches ?? 0}`
+  const evidenceSummary = record.totals.evidence
+    ? ` | 🔎${record.totals.evidence.searches ?? 0} | 🌐${record.totals.evidence.fetches ?? 0}`
     : "";
 
   return `${record.mode}:${record.batch.exitStatus} | ${subject} | ${record.batch.completed}/${record.batch.total} | 🔗${record.totals.citationsCount} | 🛠️${record.totals.toolCalls.total}${evidenceSummary}`;
@@ -1744,6 +2066,7 @@ export default function (pi: ExtensionAPI) {
   let executeTotals = createExecuteSubagentTotals();
   let liveExploreBatch: ExploreLiveBatchState | undefined;
   let liveExecuteBatch: ExecuteLiveBatchState | undefined;
+  let liveHarnessBatch: HarnessLiveBatchState | undefined;
 
   function getActiveToolNames(): string[] {
     const active = pi.getActiveTools() as Array<string | { name?: string }>;
@@ -1773,6 +2096,7 @@ export default function (pi: ExtensionAPI) {
   function clearLiveSubagentBatches() {
     liveExploreBatch = undefined;
     liveExecuteBatch = undefined;
+    liveHarnessBatch = undefined;
   }
 
   function setLiveExploreBatch(details: ExploreSubagentToolDetails) {
@@ -1784,6 +2108,7 @@ export default function (pi: ExtensionAPI) {
       snapshots: details.snapshots,
     };
     liveExecuteBatch = undefined;
+    liveHarnessBatch = undefined;
   }
 
   function setLiveExecuteBatch(details: ExecuteSubagentToolDetails) {
@@ -1795,6 +2120,20 @@ export default function (pi: ExtensionAPI) {
       snapshots: details.snapshots,
     };
     liveExploreBatch = undefined;
+    liveHarnessBatch = undefined;
+  }
+
+  function setLiveHarnessBatch(details: HarnessSubagentsToolDetails) {
+    liveHarnessBatch = {
+      subject: details.subject,
+      mode: details.mode,
+      completed: details.completed,
+      total: details.total,
+      subagents: details.subagents,
+      snapshots: details.snapshots,
+    };
+    liveExploreBatch = undefined;
+    liveExecuteBatch = undefined;
   }
 
   function resetExploreTracking() {
@@ -1835,17 +2174,28 @@ export default function (pi: ExtensionAPI) {
     recordExternalSources(urls);
   }
 
-  function markSubagentUsage(details: ExploreSubagentToolDetails | undefined) {
+  function getTrackedSubagentSearchCount(result: { searches?: number; toolCalls?: Record<string, number> }): number {
+    return result.searches ?? result.toolCalls?.harness_web_search ?? 0;
+  }
+
+  function getTrackedSubagentFetchCount(result: { fetches?: number; toolCalls?: Record<string, number> }): number {
+    return result.fetches ?? result.toolCalls?.harness_web_fetch ?? 0;
+  }
+
+  function markSubagentUsage(details: { results: Array<{ citations: string[]; searches?: number; fetches?: number; toolCalls?: Record<string, number> }> } | undefined) {
     beginExploreEvidenceChainIfNeeded();
     exploreTotals.subagentRuns += 1;
     if (exploreChain.active) exploreChain.subagentRuns += 1;
     if (!details) return;
 
-    exploreTotals.searches += details.results.reduce((sum, result) => sum + result.searches, 0);
-    exploreTotals.fetches += details.results.reduce((sum, result) => sum + result.fetches, 0);
+    const searches = details.results.reduce((sum, result) => sum + getTrackedSubagentSearchCount(result), 0);
+    const fetches = details.results.reduce((sum, result) => sum + getTrackedSubagentFetchCount(result), 0);
+
+    exploreTotals.searches += searches;
+    exploreTotals.fetches += fetches;
     if (exploreChain.active) {
-      exploreChain.searches += details.results.reduce((sum, result) => sum + result.searches, 0);
-      exploreChain.fetches += details.results.reduce((sum, result) => sum + result.fetches, 0);
+      exploreChain.searches += searches;
+      exploreChain.fetches += fetches;
     }
     recordExternalSources(details.results.flatMap((result) => result.citations));
   }
@@ -1860,12 +2210,14 @@ export default function (pi: ExtensionAPI) {
     recordExternalSources(extractUrlsFromText(command));
   }
 
-  function markExecuteSubagentUsage(details: ExecuteSubagentToolDetails | undefined) {
+  function markExecuteSubagentUsage(details: { results: Array<{ role: string }> } | undefined) {
     executeTotals.subagentRuns += 1;
     if (!details) return;
 
     for (const result of details.results) {
-      executeTotals.roleRuns[result.role] += 1;
+      if (result.role === "PLN" || result.role === "IMP" || result.role === "VER") {
+        executeTotals.roleRuns[result.role] += 1;
+      }
     }
   }
 
@@ -1900,14 +2252,20 @@ export default function (pi: ExtensionAPI) {
   function updateUI(ctx: ExtensionContext) {
     if (!ctx.hasUI) return;
 
+    const liveWidget = liveHarnessBatch
+      ? [formatLiveHarnessBatchStatus(liveHarnessBatch)]
+      : liveExploreBatch
+        ? [formatLiveExploreBatchStatus(liveExploreBatch)]
+        : liveExecuteBatch
+          ? [formatLiveExecuteBatchStatus(liveExecuteBatch)]
+          : undefined;
+
+    ctx.ui.setWidget("harness", liveWidget);
+
     if (state.mode === "explore") {
       ctx.ui.setStatus(
         "harness",
         `🧠 EXPLORE 🤖${exploreTotals.subagentRuns} 🔎${exploreTotals.searches} 🌐${exploreTotals.fetches} 🔗${exploreTotals.sources.size}`,
-      );
-      ctx.ui.setWidget(
-        "harness",
-        liveExploreBatch ? [formatLiveExploreBatchStatus(liveExploreBatch)] : undefined,
       );
       return;
     }
@@ -1921,15 +2279,10 @@ export default function (pi: ExtensionAPI) {
         "harness",
         `⚙️ EXECUTE 🤖${executeTotals.subagentRuns} ✅${passed} ❌${failed} ⏳${pending} 📦${state.commitCount}`,
       );
-      ctx.ui.setWidget(
-        "harness",
-        liveExecuteBatch ? [formatLiveExecuteBatchStatus(liveExecuteBatch)] : undefined,
-      );
       return;
     }
 
     ctx.ui.setStatus("harness", undefined);
-    ctx.ui.setWidget("harness", undefined);
   }
 
   function endExploreEvidenceChain() {
@@ -2065,9 +2418,9 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("tool_result", async (event, ctx) => {
     if (state.mode === "explore") {
-      if (event.toolName === "harness_explore_subagents") {
-        const details = event.details as ExploreSubagentToolDetails | undefined;
-        markSubagentUsage(details);
+      if (event.toolName === "harness_subagents" || event.toolName === "harness_explore_subagents") {
+        const details = event.details as HarnessSubagentsToolDetails | ExploreSubagentToolDetails | undefined;
+        markSubagentUsage(details as { results: Array<{ citations: string[]; searches?: number; fetches?: number; toolCalls?: Record<string, number> }> } | undefined);
         updateUI(ctx);
         return;
       }
@@ -2098,9 +2451,9 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    if (state.mode === "execute" && event.toolName === "harness_execute_subagents") {
-      const details = event.details as ExecuteSubagentToolDetails | undefined;
-      markExecuteSubagentUsage(details);
+    if (state.mode === "execute" && (event.toolName === "harness_subagents" || event.toolName === "harness_execute_subagents")) {
+      const details = event.details as HarnessSubagentsToolDetails | ExecuteSubagentToolDetails | undefined;
+      markExecuteSubagentUsage(details as { results: Array<{ role: string }> } | undefined);
       updateUI(ctx);
     }
   });
@@ -2146,7 +2499,7 @@ export default function (pi: ExtensionAPI) {
             "It did not show enough external evidence usage and/or explicit URL citations.",
             "",
             "Before revising, you MUST:",
-            "1. Call harness_explore_subagents to run the isolated OPT/PRA/SKP subagents in parallel if you have not already.",
+            "1. Call harness_subagents to run the isolated OPT/PRA/SKP subagents in parallel if you have not already.",
             "2. Use harness_web_search for focused external queries when you need additional evidence beyond the subagent pass.",
             "3. Use harness_web_fetch on relevant URLs before relying on them in the synthesis.",
             "4. Revise the debate so every external claim cites explicit source URLs.",
@@ -2165,11 +2518,14 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("tool_call", async (event) => {
     if (IS_SUBAGENT_CHILD) {
-      if ((event.toolName === "write" || event.toolName === "edit") && CHILD_SUBAGENT_ROLE !== "IMP") {
-        return {
-          block: true,
-          reason: `🔴 BLOCKED: ${CHILD_SUBAGENT_ROLE || "This child subagent"} cannot mutate files.`,
-        };
+      if (event.toolName === "write" || event.toolName === "edit") {
+        const allowed = CHILD_SUBAGENT_TOOLS.includes(event.toolName);
+        if (!allowed) {
+          return {
+            block: true,
+            reason: `🔴 BLOCKED: ${CHILD_SUBAGENT_ROLE || "This child subagent"} cannot mutate files.`,
+          };
+        }
       }
 
       if (isToolCallEventType("bash", event)) {
@@ -2210,14 +2566,14 @@ export default function (pi: ExtensionAPI) {
       if (event.toolName === "write" || event.toolName === "edit") {
         return {
           block: true,
-          reason: `🔴 BLOCKED: Main execute mode is orchestration-only. Delegate implementation to harness_execute_subagents with the IMP role.`,
+          reason: `🔴 BLOCKED: Main execute mode is orchestration-only. Delegate implementation to harness_subagents with an IMP-configured subagent.`,
         };
       }
 
       if (isToolCallEventType("bash", event)) {
         return {
           block: true,
-          reason: "🔴 BLOCKED: Main execute mode is orchestration-only. Delegate build/test/check commands to harness_execute_subagents with the VER role.",
+          reason: "🔴 BLOCKED: Main execute mode is orchestration-only. Delegate build/test/check commands to harness_subagents with a VER-configured subagent.",
         };
       }
     }
@@ -2240,7 +2596,7 @@ You are operating in divergent thinking mode with 3-persona debate.
 Rules: No unanimous agreement in Round 1. Evidence required from Round 2. Unsupported claims struck in Round 3.
 Local file mutation is BLOCKED.
 Structured external-evidence tools are active:
-- harness_explore_subagents: REQUIRED isolated parallel OPT/PRA/SKP subagent pass before final synthesis.
+- harness_subagents: REQUIRED isolated parallel OPT/PRA/SKP subagent pass before final synthesis. Inject OPT/PRA/SKP as subagent personas.
 - harness_web_search: discover ecosystem, prior-art, benchmark, and failure-mode sources.
 - harness_web_fetch: inspect source pages and cite exact URLs before relying on them.
 External-evidence policy:
@@ -2248,7 +2604,7 @@ External-evidence policy:
 - Ecosystem, library, market, benchmark, standards, prior-art, and failure-mode claims MUST be backed by external URLs.
 - Search snippets alone are not enough for key claims; fetch the strongest sources.
 - Raw network bash (curl/wget/etc.) is BLOCKED so provenance stays auditable.
-- Before producing a final /explore synthesis, you MUST call harness_explore_subagents at least once.
+- Before producing a final /explore synthesis, you MUST call harness_subagents at least once with OPT/PRA/SKP personas.
 - A synthesis is not acceptable unless it cites explicit source URLs or marks a claim [UNVERIFIED].
 Evidence collected this session so far: ${exploreTotals.subagentRuns} subagent rounds, ${exploreTotals.searches} searches, ${exploreTotals.fetches} fetches, ${exploreTotals.sources.size} unique URLs.
 `;
@@ -2266,14 +2622,14 @@ You are operating in convergent execution mode with 3-role mutual verification.
 - ✅ VER (Verifier): Sole authority on AC pass/fail. Cannot write code.
 Iron law: No role evaluates its own output.
 This parent execute agent is an ORCHESTRATOR. Direct write/edit/bash implementation is blocked here.
-Use harness_execute_subagents to invoke real isolated PLN / IMP / VER subprocess agents.
+Use harness_subagents to invoke real isolated PLN / IMP / VER subprocess agents. Use sequential mode for PLN → IMP → VER handoffs.
 AC Status: ${passed}/${total} passed. Regressions: ${state.regressionCount}. Commits: ${state.commitCount}.
 ${state.currentIncrement ? `Current increment: ${state.currentIncrement}` : ""}
 VERIFICATION REGISTRY: VER must maintain a cumulative Verification Registry (.harness/verification-registry.json).
 - After confirming an AC passes, VER MUST call harness_verify_register to record the verification method.
 - Before regression checks, VER MUST call harness_verify_list and re-run every registered verification.
 - A passing AC without a registered verification is a gap that PLN should challenge.
-- Planning, implementation, and verification work should be delegated to harness_execute_subagents rather than role-played in the parent context.
+- Planning, implementation, and verification work should be delegated to harness_subagents rather than role-played in the parent context.
 After VER confirms all gates pass and no regressions for an increment, VER MUST call the harness_commit tool to commit and push the changes before proceeding to the next increment.
 `;
     }
@@ -2402,12 +2758,157 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
   });
 
   pi.registerTool({
+    name: "harness_subagents",
+    label: "Harness Subagents",
+    description: "Run isolated subagents in parallel or sequentially using injected personas, system prompts, and per-subagent tool policies.",
+    promptSnippet: "Run generic isolated subagents with injected personas, prompts, and tool policies.",
+    promptGuidelines: [
+      "Use harness_subagents whenever you want real isolated subprocess agents instead of role-playing multiple viewpoints in one context.",
+      "Inject the persona or role through each subagent's system_prompt and choose active_tools / bash_policy explicitly.",
+      "Use parallel mode for independent perspectives, or sequential mode when later subagents should react to earlier outputs.",
+      "For /explore, configure OPT / PRA / SKP in parallel. For /execute, configure PLN / IMP / VER in sequential mode.",
+    ],
+    parameters: Type.Object({
+      subject: Type.String({ description: "Shared subject, objective, or decision question for this subagent batch" }),
+      subagents: Type.Array(Type.Object({
+        role: Type.String({ description: "Subagent identifier, persona, or role name" }),
+        label: Type.Optional(Type.String({ description: "Optional human-readable label" })),
+        icon: Type.Optional(Type.String({ description: "Optional icon prefix such as 🔴 or ✅" })),
+        task: Type.Optional(Type.String({ description: "Optional per-subagent task override. Defaults to a generic subject/context task." })),
+        system_prompt: Type.String({ description: "System prompt injected into this subagent to define its persona, role, and operating rules" }),
+        active_tools: Type.Optional(Type.Array(Type.String(), { description: "Optional allowed tools for this subagent" })),
+        bash_policy: Type.Optional(Type.String({ description: "Optional bash policy: none, read-only, verify, or implement" })),
+      }), { description: "Subagent specifications" }),
+      mode: Type.Optional(Type.String({ description: "Batch mode: 'parallel' (default) or 'sequential'" })),
+      context: Type.Optional(Type.String({ description: "Optional shared context appended to default-generated tasks" })),
+    }),
+    async execute(toolCallId, params, signal, onUpdate, ctx) {
+      const mode = (params.mode?.trim().toLowerCase() === "sequential" ? "sequential" : "parallel") as "parallel" | "sequential";
+      const definitions = normalizeHarnessSubagentDefinitions(params.subject, params.subagents, params.context);
+      if (definitions.length === 0) {
+        throw new Error("harness_subagents requires at least one valid subagent definition.");
+      }
+
+      const descriptors = definitions.map(({ role, label, icon }) => ({ role, label, icon }));
+      const modelSpec = modelToCliSpec(ctx.model as { provider?: string; id?: string } | undefined);
+      const thinkingLevel = pi.getThinkingLevel();
+      let latestSnapshots: HarnessSubagentSnapshot<string>[] = [];
+      const batchStartedAt = new Date().toISOString();
+
+      const specs: HarnessSubagentSpec<string>[] = definitions.map((subagent) => ({
+        mode: "generic",
+        role: subagent.role,
+        label: `${subagent.icon ? `${subagent.icon} ` : ""}${subagent.label}`,
+        task: subagent.task,
+        systemPrompt: subagent.systemPrompt,
+        cwd: ctx.cwd,
+        activeTools: subagent.activeTools,
+        bashPolicy: subagent.bashPolicy,
+        extensionPath: CURRENT_EXTENSION_PATH,
+        modelSpec,
+        thinkingLevel,
+        signal,
+      }));
+
+      setLiveHarnessBatch(buildHarnessSubagentsDetails(params.subject, mode, descriptors, 0, descriptors.length, [], []));
+      updateUI(ctx);
+
+      try {
+        const results = await runHarnessSubagentBatch(specs, {
+          mode,
+          taskResolver: mode === "sequential"
+            ? (spec, previousResults) => {
+                if (previousResults.length === 0) return spec.task;
+                return [
+                  spec.task,
+                  "",
+                  "Context from prior subagent outputs:",
+                  formatPriorSubagentOutputs(previousResults),
+                ].join("\n");
+              }
+            : undefined,
+          onSnapshot: (snapshots, completed, total, batchResults) => {
+            latestSnapshots = snapshots;
+            const details = buildHarnessSubagentsDetails(params.subject, mode, descriptors, completed, total, batchResults, snapshots);
+            setLiveHarnessBatch(details);
+            updateUI(ctx);
+            onUpdate?.({
+              content: [{ type: "text", text: summarizeHarnessSubagentsProgress(details) }],
+              details,
+            });
+          },
+        });
+
+        const details = buildHarnessSubagentsDetails(
+          params.subject,
+          mode,
+          descriptors,
+          results.length,
+          descriptors.length,
+          results,
+          latestSnapshots,
+        );
+        const batchEndedAt = new Date().toISOString();
+        details.record = appendSubagentBatchRecord(buildHarnessSubagentsRecord(
+          toolCallId,
+          details,
+          batchStartedAt,
+          batchEndedAt,
+        ));
+
+        return {
+          content: [{ type: "text", text: formatHarnessSubagentsResults(details) }],
+          details,
+        };
+      } finally {
+        clearLiveSubagentBatches();
+        updateUI(ctx);
+      }
+    },
+    renderCall(args, theme, _context) {
+      const subject = summarizeSubagentText(args.subject, MAX_SUBAGENT_CALL_PREVIEW_CHARS) || "...";
+      const mode = typeof args.mode === "string" && args.mode.trim().toLowerCase() === "sequential"
+        ? "sequential"
+        : "parallel";
+      const roles = Array.isArray(args.subagents)
+        ? args.subagents
+          .map((subagent) => typeof subagent?.role === "string" ? subagent.role.trim() : "")
+          .filter(Boolean)
+          .join(", ") || "subagents"
+        : "subagents";
+      const text = [
+        theme.fg("toolTitle", theme.bold("subagents ")),
+        theme.fg("accent", subject),
+        theme.fg("muted", ` · ${mode} · ${roles}`),
+      ].join("");
+      return new Text(text, 0, 0);
+    },
+    renderResult(result, { expanded, isPartial }, theme, _context) {
+      const details = result.details as HarnessSubagentsToolDetails | undefined;
+      if (!details) {
+        const textBlock = result.content.find((item) => item.type === "text");
+        const fallback = textBlock?.type === "text" ? textBlock.text : "";
+        if (isPartial) return new Text(theme.fg("warning", "Launching harness subagents..."), 0, 0);
+        return new Text(expanded ? (fallback || "(no output)") : (summarizeSubagentText(fallback, 160) || "(no output)"), 0, 0);
+      }
+
+      return new Text(
+        expanded
+          ? renderHarnessSubagentsExpandedText(details, isPartial, theme)
+          : renderHarnessSubagentsCollapsedText(details, theme),
+        0,
+        0,
+      );
+    },
+  });
+
+  pi.registerTool({
     name: "harness_explore_subagents",
     label: "Explore Subagents",
-    description: "Run isolated OPT/PRA/SKP explore subagents in parallel using separate pi subprocesses. Use this in explore mode before synthesis so each persona gathers its own evidence-backed position.",
-    promptSnippet: "Run isolated OPT/PRA/SKP subagents in parallel for explore mode and return their evidence-backed positions.",
+    description: "Deprecated compatibility alias for harness_subagents preconfigured with OPT/PRA/SKP personas.",
+    promptSnippet: "Compatibility alias: use harness_subagents for new code; this launches OPT/PRA/SKP in parallel.",
     promptGuidelines: [
-      "Call harness_explore_subagents in explore mode before writing the final debate synthesis; it launches OPT/PRA/SKP in parallel.",
+      "Prefer harness_subagents for new code. This alias remains for backward compatibility and launches OPT/PRA/SKP in parallel.",
       "Pass a concise topic and optional project context summary so each subagent can research independently.",
       "Use the returned citations directly in the final debate transcript and synthesis.",
     ],
@@ -2416,10 +2917,6 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
       project_context: Type.Optional(Type.String({ description: "Optional codebase/project context summary for the subagents" })),
     }),
     async execute(toolCallId, params, signal, onUpdate, ctx) {
-      if (state.mode !== "explore") {
-        throw new Error("harness_explore_subagents is only available in explore mode. Use /explore first.");
-      }
-
       const modelSpec = modelToCliSpec(ctx.model as { provider?: string; id?: string } | undefined);
       const thinkingLevel = pi.getThinkingLevel();
       let latestSnapshots: HarnessSubagentSnapshot<ExplorePersona>[] = [];
@@ -2513,10 +3010,10 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
   pi.registerTool({
     name: "harness_execute_subagents",
     label: "Execute Subagents",
-    description: "Run isolated PLN / IMP / VER execute subagents using separate pi subprocesses. Use this in execute mode instead of role-playing the three roles inside the parent agent.",
-    promptSnippet: "Run isolated execute subagents (PLN / IMP / VER) and return their role-specific outputs.",
+    description: "Deprecated compatibility alias for harness_subagents preconfigured with PLN / IMP / VER roles.",
+    promptSnippet: "Compatibility alias: use harness_subagents for new code; this runs PLN / IMP / VER subagents.",
     promptGuidelines: [
-      "Use harness_execute_subagents in execute mode for planning, implementation, and verification work.",
+      "Prefer harness_subagents for new code. This alias remains for backward compatibility and runs PLN / IMP / VER subagents.",
       "Default to sequential mode so each role can react to prior role outputs.",
       "Reserve registry updates and harness_commit for the parent execute agent after VER's evidence is in.",
     ],
@@ -2527,10 +3024,6 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
       context: Type.Optional(Type.String({ description: "Optional additional context for the role subagents" })),
     }),
     async execute(toolCallId, params, signal, onUpdate, ctx) {
-      if (state.mode !== "execute") {
-        throw new Error("harness_execute_subagents is only available in execute mode. Use /execute first.");
-      }
-
       const requestedRoles = (params.roles ?? ["PLN", "IMP", "VER"])
         .map((role) => role.trim().toUpperCase())
         .filter(Boolean);

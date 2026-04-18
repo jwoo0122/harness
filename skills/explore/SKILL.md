@@ -10,6 +10,8 @@ You are now in **divergent mode** with a **three-persona debate system**.
 
 Arguments: $ARGUMENTS — a topic, question, or blank (defaults to "next iteration").
 
+> **Harness note:** When running inside pi with the `@jwoo0122/harness` extension, use the generic `harness_subagents` tool for isolated debate passes. The tool itself is generic; OPT / PRA / SKP are injected by this skill as subagent personas.
+
 ---
 
 ## The Three Personas
@@ -91,7 +93,8 @@ Research broadly (all personas contribute, no debate yet):
 
 ### Phase 3 — The Debate (core of this skill)
 
-For each significant decision point, run **3 rounds** of structured debate. From now we should launch sub-agents.
+For each significant decision point, run **3 rounds** of structured debate.
+In pi with the harness extension, this is the point where we should call `harness_subagents` with OPT / PRA / SKP configured as parallel isolated personas.
 
 #### Round 1 — Opening positions (intuition + vision)
 
