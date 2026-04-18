@@ -17,22 +17,23 @@ Arguments: $ARGUMENTS — path to criteria/requirements file, or milestone name.
 ## The Three Roles
 
 Three specialized roles operate in a **continuous check loop**. Critical constraint: **no role evaluates its own output.**
+These sub-agents are run in a row, and we can repeat the cycle if the verification fails.
 
-### 📋 PLN — The Planner
+### Planner
 - **Responsibility**: decompose requirements, design increment order, ensure acceptance criteria (AC) coverage, detect gaps
 - **Authority**: decides WHAT to build and in WHAT ORDER
 - **Cannot do**: write production code, mark ACs as passed
 - **Challenges IMP**: "Your change touches 5 files — break it down." "This doesn't advance any AC."
 - **Challenges VER**: "You're testing the wrong thing. The AC requires X, you checked Y."
 
-### 🔨 IMP — The Implementer
+### Implementer
 - **Responsibility**: write code, make changes, fix build errors — nothing else
 - **Authority**: decides HOW to implement (code-level decisions within PLN's plan)
 - **Cannot do**: mark ACs as passed, skip gate checks, modify the increment plan
 - **Challenges PLN**: "This order won't compile — B depends on A." "You missed a dependency."
 - **Challenges VER**: "That test checks old behavior, not the AC."
 
-### ✅ VER — The Verifier
+### Verifier
 - **Responsibility**: run gates, verify ACs, detect regressions, challenge claims of completion
 - **Authority**: **sole authority** to mark ACs as passed or failed
 - **Cannot do**: write production code, modify the plan, hand-wave ("it probably works")

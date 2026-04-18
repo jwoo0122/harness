@@ -28,7 +28,7 @@ pi install git:github.com/jwoo0122/harness
 
 This gives you:
 - `/explore` and `/execute` commands with mode switching
-- **Real explore subagents**: isolated OPT / PRA / SKP `pi` subprocesses before synthesis
+- **Real explore subagents**: isolated OPT / PRA / SKP `pi` subprocesses launched in parallel before synthesis
 - **Real execute subagents**: isolated PLN / IMP / VER `pi` subprocesses for planning, implementation, and verification
 - **Tool enforcement**: write/edit/build blocked in explore mode, and main `/execute` runs as orchestration-only
 - **External evidence gate**: structured web search/fetch required for ecosystem claims
@@ -62,7 +62,7 @@ The skills work standalone as pure Markdown protocols — no extension needed. Y
 
 The agent will:
 1. Gather project context (read-only)
-2. Run isolated OPT / PRA / SKP subagents for first-pass positions
+2. Run isolated OPT / PRA / SKP subagents in parallel for first-pass positions
 3. Research broadly across the ecosystem with explicit external citations
 4. Run a 3-round debate with cross-examination
 5. Produce a synthesis document at `target/explore/`

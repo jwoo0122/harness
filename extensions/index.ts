@@ -124,6 +124,7 @@ interface PersistedSubagentBatchRecord {
 
 interface ExploreSubagentToolDetails {
   topic: string;
+  mode: "parallel";
   completed: number;
   total: number;
   results: ExploreSubagentResult[];
@@ -627,7 +628,7 @@ function buildExploreSubagentTask(
 
 function summarizeExploreSubagentProgress(details: ExploreSubagentToolDetails): string {
   const completedLabels = details.results.map((result) => result.persona).join(", ") || "none";
-  return `Running explore subagents for \"${details.topic}\" — ${details.completed}/${details.total} complete (${completedLabels})`;
+  return `Running explore subagents in ${details.mode} for \"${details.topic}\" — ${details.completed}/${details.total} complete (${completedLabels})`;
 }
 
 function formatExploreSubagentResults(details: ExploreSubagentToolDetails): string {
@@ -636,7 +637,7 @@ function formatExploreSubagentResults(details: ExploreSubagentToolDetails): stri
   const totalUrls = uniqueUrls(details.results.flatMap((result) => result.citations)).length;
 
   const lines: string[] = [];
-  lines.push(`Explore subagents completed for: ${details.topic}`);
+  lines.push(`Explore subagents completed in ${details.mode} for: ${details.topic}`);
   lines.push(`Coverage: ${details.results.length}/${details.total} personas | 🔎 ${totalSearches} searches | 🌐 ${totalFetches} fetches | 🔗 ${totalUrls} URLs`);
   lines.push("");
 
@@ -1102,7 +1103,7 @@ function renderExploreSubagentExpandedText(
 ): string {
   const lines: string[] = [];
   lines.push(theme.fg("toolTitle", theme.bold(`Topic: ${details.topic}`)));
-  lines.push(theme.fg("muted", `${details.completed}/${details.total} personas complete${isPartial ? " · live" : ""}`));
+  lines.push(theme.fg("muted", `Mode: ${details.mode} · ${details.completed}/${details.total} personas complete${isPartial ? " · live" : ""}`));
 
   for (const role of EXPLORE_SUBAGENT_ROLES) {
     const result = details.results.find((entry) => entry.persona === role.persona);
@@ -1206,6 +1207,7 @@ function buildExploreSubagentDetails(
 ): ExploreSubagentToolDetails {
   return {
     topic,
+    mode: "parallel",
     completed,
     total,
     results: results.map((result) => mapExploreRunResult(topic, result)),
@@ -1324,6 +1326,7 @@ function buildExploreSubagentRecord(
     toolCallId,
     mode: "explore",
     topic: details.topic,
+    executionMode: details.mode,
     batch: {
       startedAt: batchStartedAt,
       endedAt: batchEndedAt,
@@ -2143,7 +2146,7 @@ export default function (pi: ExtensionAPI) {
             "It did not show enough external evidence usage and/or explicit URL citations.",
             "",
             "Before revising, you MUST:",
-            "1. Call harness_explore_subagents to run the isolated OPT/PRA/SKP subagents if you have not already.",
+            "1. Call harness_explore_subagents to run the isolated OPT/PRA/SKP subagents in parallel if you have not already.",
             "2. Use harness_web_search for focused external queries when you need additional evidence beyond the subagent pass.",
             "3. Use harness_web_fetch on relevant URLs before relying on them in the synthesis.",
             "4. Revise the debate so every external claim cites explicit source URLs.",
@@ -2237,7 +2240,7 @@ You are operating in divergent thinking mode with 3-persona debate.
 Rules: No unanimous agreement in Round 1. Evidence required from Round 2. Unsupported claims struck in Round 3.
 Local file mutation is BLOCKED.
 Structured external-evidence tools are active:
-- harness_explore_subagents: REQUIRED isolated OPT/PRA/SKP subagent pass before final synthesis.
+- harness_explore_subagents: REQUIRED isolated parallel OPT/PRA/SKP subagent pass before final synthesis.
 - harness_web_search: discover ecosystem, prior-art, benchmark, and failure-mode sources.
 - harness_web_fetch: inspect source pages and cite exact URLs before relying on them.
 External-evidence policy:
@@ -2402,9 +2405,9 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
     name: "harness_explore_subagents",
     label: "Explore Subagents",
     description: "Run isolated OPT/PRA/SKP explore subagents in parallel using separate pi subprocesses. Use this in explore mode before synthesis so each persona gathers its own evidence-backed position.",
-    promptSnippet: "Run isolated OPT/PRA/SKP subagents for explore mode and return their evidence-backed positions.",
+    promptSnippet: "Run isolated OPT/PRA/SKP subagents in parallel for explore mode and return their evidence-backed positions.",
     promptGuidelines: [
-      "Call harness_explore_subagents in explore mode before writing the final debate synthesis.",
+      "Call harness_explore_subagents in explore mode before writing the final debate synthesis; it launches OPT/PRA/SKP in parallel.",
       "Pass a concise topic and optional project context summary so each subagent can research independently.",
       "Use the returned citations directly in the final debate transcript and synthesis.",
     ],
@@ -2484,7 +2487,7 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
       const text = [
         theme.fg("toolTitle", theme.bold("explore_subagents ")),
         theme.fg("accent", topic),
-        theme.fg("muted", " · OPT/PRA/SKP · isolated subprocesses"),
+        theme.fg("muted", " · OPT/PRA/SKP · parallel isolated subprocesses"),
       ].join("");
       return new Text(text, 0, 0);
     },
