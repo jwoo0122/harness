@@ -12,10 +12,10 @@
           "README.md",
           "INTEGRATION.md"
         ],
-        "description": "Regression re-check of verification-registry plumbing after INC-3: update the existing AC entry via harness_verify_register, then confirm harness_verify_list still returns cumulative entries in execute mode after subagent renderer changes in extensions/index.ts."
+        "description": "Regression re-check of verification-registry plumbing after INC-4: update the existing AC entry via harness_verify_register, then confirm harness_verify_list still returns cumulative entries in execute mode after persisted subagent record changes in extensions/index.ts."
       },
       "registeredAt": "INC-1",
-      "lastVerifiedAt": "INC-3",
+      "lastVerifiedAt": "INC-4",
       "lastResult": "pass"
     }
   }

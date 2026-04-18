@@ -63,12 +63,72 @@ interface ExploreSubagentResult extends HarnessSubagentRunResult<ExplorePersona>
   fetches: number;
 }
 
+type PersistedSubagentBatchExitStatus = "success" | "partial_failure" | "failed";
+
+interface PersistedSubagentBatchRecordLink {
+  entryType: "custom";
+  customType: "harness-subagent-record";
+  toolCallId: string;
+  summary: string;
+}
+
+interface PersistedSubagentRunRecord {
+  role: string;
+  label: string;
+  pid?: number;
+  model?: string;
+  exitCode: number;
+  exitStatus: "success" | "error";
+  startedAt?: string;
+  endedAt?: string;
+  durationMs?: number;
+  invocation: string;
+  citationsCount: number;
+  evidence?: {
+    searches?: number;
+    fetches?: number;
+  };
+  toolCalls: Record<string, number>;
+  outputPreview?: string;
+  stderrPreview?: string;
+}
+
+interface PersistedSubagentBatchRecord {
+  schema: "harness-subagent-record/v1";
+  toolCallId: string;
+  mode: "explore" | "execute";
+  topic?: string;
+  objective?: string;
+  executionMode?: "parallel" | "sequential";
+  batch: {
+    startedAt: string;
+    endedAt: string;
+    durationMs: number;
+    completed: number;
+    total: number;
+    exitStatus: PersistedSubagentBatchExitStatus;
+  };
+  totals: {
+    citationsCount: number;
+    evidence?: {
+      searches?: number;
+      fetches?: number;
+    };
+    toolCalls: {
+      total: number;
+      byTool: Record<string, number>;
+    };
+  };
+  subagents: PersistedSubagentRunRecord[];
+}
+
 interface ExploreSubagentToolDetails {
   topic: string;
   completed: number;
   total: number;
   results: ExploreSubagentResult[];
   snapshots: HarnessSubagentSnapshot<ExplorePersona>[];
+  record?: PersistedSubagentBatchRecordLink;
 }
 
 interface ExecuteSubagentResult extends HarnessSubagentRunResult<ExecuteRole> {
@@ -83,6 +143,7 @@ interface ExecuteSubagentToolDetails {
   roles: ExecuteRole[];
   results: ExecuteSubagentResult[];
   snapshots: HarnessSubagentSnapshot<ExecuteRole>[];
+  record?: PersistedSubagentBatchRecordLink;
 }
 
 interface ExecuteSubagentTotals {
@@ -183,6 +244,9 @@ const MAX_SUBAGENT_OUTPUT_LINE_CHARS = 120;
 const MAX_SUBAGENT_STDERR_PREVIEW_CHARS = 200;
 const MAX_SUBAGENT_RECENT_STREAM_RENDER_ITEMS = 8;
 const MAX_SUBAGENT_CITATIONS_RENDER = 4;
+const HARNESS_SUBAGENT_RECORD_TYPE = "harness-subagent-record";
+const MAX_SUBAGENT_RECORD_OUTPUT_PREVIEW_CHARS = 200;
+const MAX_SUBAGENT_RECORD_STDERR_PREVIEW_CHARS = 160;
 
 const EXPLORE_SUBAGENT_ROLES: Array<{
   persona: ExplorePersona;
@@ -1176,6 +1240,161 @@ function buildExecuteSubagentDetails(
   };
 }
 
+function parseIsoTimestampMs(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function getElapsedMs(startedAt: string | undefined, endedAt: string | undefined): number | undefined {
+  const startMs = parseIsoTimestampMs(startedAt);
+  const endMs = parseIsoTimestampMs(endedAt);
+  if (startMs === undefined || endMs === undefined) return undefined;
+  return Math.max(0, endMs - startMs);
+}
+
+function sumToolCallMap(toolCalls: Record<string, number>): number {
+  return Object.values(toolCalls).reduce((sum, count) => sum + count, 0);
+}
+
+function mergeToolCallCounts(results: Array<{ toolCalls: Record<string, number> }>): Record<string, number> {
+  const merged: Record<string, number> = {};
+
+  for (const result of results) {
+    for (const [toolName, count] of Object.entries(result.toolCalls)) {
+      merged[toolName] = (merged[toolName] ?? 0) + count;
+    }
+  }
+
+  return merged;
+}
+
+function getSubagentBatchExitStatus(
+  results: Array<{ exitCode: number }>,
+): PersistedSubagentBatchExitStatus {
+  if (results.length === 0) return "failed";
+
+  const failures = results.filter((result) => result.exitCode !== 0).length;
+  if (failures === 0) return "success";
+  if (failures === results.length) return "failed";
+  return "partial_failure";
+}
+
+function buildPersistedSubagentRunRecord(
+  result: HarnessSubagentRunResult<string>,
+  evidence?: PersistedSubagentRunRecord["evidence"],
+): PersistedSubagentRunRecord {
+  const outputPreview = summarizeSubagentText(
+    result.output || result.assistantPreview,
+    MAX_SUBAGENT_RECORD_OUTPUT_PREVIEW_CHARS,
+  ) || undefined;
+  const stderrPreview = summarizeSubagentText(result.stderr, MAX_SUBAGENT_RECORD_STDERR_PREVIEW_CHARS) || undefined;
+
+  return {
+    role: String(result.role),
+    label: result.label,
+    pid: result.provenance.pid,
+    model: result.model,
+    exitCode: result.exitCode,
+    exitStatus: result.exitCode === 0 ? "success" : "error",
+    startedAt: result.provenance.startedAt,
+    endedAt: result.provenance.endedAt,
+    durationMs: getElapsedMs(result.provenance.startedAt, result.provenance.endedAt),
+    invocation: summarizeSubagentInvocation(result.provenance),
+    citationsCount: result.citations.length,
+    evidence,
+    toolCalls: { ...result.toolCalls },
+    outputPreview,
+    stderrPreview,
+  };
+}
+
+function buildExploreSubagentRecord(
+  toolCallId: string,
+  details: ExploreSubagentToolDetails,
+  batchStartedAt: string,
+  batchEndedAt: string,
+): PersistedSubagentBatchRecord {
+  const toolCalls = mergeToolCallCounts(details.results);
+  const searches = details.results.reduce((sum, result) => sum + result.searches, 0);
+  const fetches = details.results.reduce((sum, result) => sum + result.fetches, 0);
+
+  return {
+    schema: "harness-subagent-record/v1",
+    toolCallId,
+    mode: "explore",
+    topic: details.topic,
+    batch: {
+      startedAt: batchStartedAt,
+      endedAt: batchEndedAt,
+      durationMs: getElapsedMs(batchStartedAt, batchEndedAt) ?? 0,
+      completed: details.completed,
+      total: details.total,
+      exitStatus: getSubagentBatchExitStatus(details.results),
+    },
+    totals: {
+      citationsCount: uniqueUrls(details.results.flatMap((result) => result.citations)).length,
+      evidence: {
+        searches,
+        fetches,
+      },
+      toolCalls: {
+        total: sumToolCallMap(toolCalls),
+        byTool: toolCalls,
+      },
+    },
+    subagents: details.results.map((result) => buildPersistedSubagentRunRecord(result, {
+      searches: result.searches,
+      fetches: result.fetches,
+    })),
+  };
+}
+
+function buildExecuteSubagentRecord(
+  toolCallId: string,
+  details: ExecuteSubagentToolDetails,
+  batchStartedAt: string,
+  batchEndedAt: string,
+): PersistedSubagentBatchRecord {
+  const toolCalls = mergeToolCallCounts(details.results);
+
+  return {
+    schema: "harness-subagent-record/v1",
+    toolCallId,
+    mode: "execute",
+    objective: details.objective,
+    executionMode: details.mode,
+    batch: {
+      startedAt: batchStartedAt,
+      endedAt: batchEndedAt,
+      durationMs: getElapsedMs(batchStartedAt, batchEndedAt) ?? 0,
+      completed: details.completed,
+      total: details.total,
+      exitStatus: getSubagentBatchExitStatus(details.results),
+    },
+    totals: {
+      citationsCount: uniqueUrls(details.results.flatMap((result) => result.citations)).length,
+      toolCalls: {
+        total: sumToolCallMap(toolCalls),
+        byTool: toolCalls,
+      },
+    },
+    subagents: details.results.map((result) => buildPersistedSubagentRunRecord(result)),
+  };
+}
+
+function formatPersistedSubagentRecordSummary(record: PersistedSubagentBatchRecord): string {
+  const subject = summarizeSubagentText(
+    record.mode === "explore" ? record.topic : record.objective,
+    72,
+  ) || `${record.mode} batch`;
+  const evidenceSummary = record.mode === "explore"
+    ? ` | 🔎${record.totals.evidence?.searches ?? 0} | 🌐${record.totals.evidence?.fetches ?? 0}`
+    : "";
+
+  return `${record.mode}:${record.batch.exitStatus} | ${subject} | ${record.batch.completed}/${record.batch.total} | 🔗${record.totals.citationsCount} | 🛠️${record.totals.toolCalls.total}${evidenceSummary}`;
+}
+
 function parseDuckDuckGoHtml(html: string, maxResults: number): WebSearchResult[] {
   const results: WebSearchResult[] = [];
   const seen = new Set<string>();
@@ -1536,6 +1755,16 @@ export default function (pi: ExtensionAPI) {
 
   function saveState() {
     pi.appendEntry("cognitive-harness-state", { ...state });
+  }
+
+  function appendSubagentBatchRecord(record: PersistedSubagentBatchRecord): PersistedSubagentBatchRecordLink {
+    pi.appendEntry(HARNESS_SUBAGENT_RECORD_TYPE, record);
+    return {
+      entryType: "custom",
+      customType: HARNESS_SUBAGENT_RECORD_TYPE,
+      toolCallId: record.toolCallId,
+      summary: formatPersistedSubagentRecordSummary(record),
+    };
   }
 
   function clearLiveSubagentBatches() {
@@ -2183,7 +2412,7 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
       topic: Type.String({ description: "Exploration topic or decision question" }),
       project_context: Type.Optional(Type.String({ description: "Optional codebase/project context summary for the subagents" })),
     }),
-    async execute(_toolCallId, params, signal, onUpdate, ctx) {
+    async execute(toolCallId, params, signal, onUpdate, ctx) {
       if (state.mode !== "explore") {
         throw new Error("harness_explore_subagents is only available in explore mode. Use /explore first.");
       }
@@ -2191,6 +2420,7 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
       const modelSpec = modelToCliSpec(ctx.model as { provider?: string; id?: string } | undefined);
       const thinkingLevel = pi.getThinkingLevel();
       let latestSnapshots: HarnessSubagentSnapshot<ExplorePersona>[] = [];
+      const batchStartedAt = new Date().toISOString();
 
       const specs: HarnessSubagentSpec<ExplorePersona>[] = EXPLORE_SUBAGENT_ROLES.map((role) => ({
         mode: "explore",
@@ -2232,6 +2462,13 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
           results,
           latestSnapshots,
         );
+        const batchEndedAt = new Date().toISOString();
+        details.record = appendSubagentBatchRecord(buildExploreSubagentRecord(
+          toolCallId,
+          details,
+          batchStartedAt,
+          batchEndedAt,
+        ));
 
         return {
           content: [{ type: "text", text: formatExploreSubagentResults(details) }],
@@ -2286,7 +2523,7 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
       mode: Type.Optional(Type.String({ description: "Execution mode: 'sequential' (default) or 'parallel'" })),
       context: Type.Optional(Type.String({ description: "Optional additional context for the role subagents" })),
     }),
-    async execute(_toolCallId, params, signal, onUpdate, ctx) {
+    async execute(toolCallId, params, signal, onUpdate, ctx) {
       if (state.mode !== "execute") {
         throw new Error("harness_execute_subagents is only available in execute mode. Use /execute first.");
       }
@@ -2304,6 +2541,7 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
       const modelSpec = modelToCliSpec(ctx.model as { provider?: string; id?: string } | undefined);
       const thinkingLevel = pi.getThinkingLevel();
       let latestSnapshots: HarnessSubagentSnapshot<ExecuteRole>[] = [];
+      const batchStartedAt = new Date().toISOString();
 
       const specs: HarnessSubagentSpec<ExecuteRole>[] = roles.map((role) => {
         const spec = resolveExecuteRole(role);
@@ -2361,6 +2599,13 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
           results,
           latestSnapshots,
         );
+        const batchEndedAt = new Date().toISOString();
+        details.record = appendSubagentBatchRecord(buildExecuteSubagentRecord(
+          toolCallId,
+          details,
+          batchStartedAt,
+          batchEndedAt,
+        ));
 
         return {
           content: [{ type: "text", text: formatExecuteSubagentResults(details) }],
