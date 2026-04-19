@@ -161,6 +161,25 @@
       "registeredAt": "INC-8",
       "lastVerifiedAt": "INC-8",
       "lastResult": "pass"
+    },
+    "AC-UI-1": {
+      "requirement": "No explore/execute prompt-status UI surface remains and validation coverage now guards it.",
+      "source": "user request 2026-04-20",
+      "verification": {
+        "strategy": "automated-test",
+        "command": "npm run validate:extensions",
+        "files": [
+          "extensions/index.ts",
+          "tests/extensions/validate-protocol-invocation.mjs",
+          "README.md",
+          "INTEGRATION.md",
+          "package.json"
+        ],
+        "description": "Runs the extension validation chain, including protocol-invocation assertions that fail if protocol footer status UI, the harness-status command, or related README/INTEGRATION status-surface copy reappears."
+      },
+      "registeredAt": "2026-04-20",
+      "lastVerifiedAt": "2026-04-20",
+      "lastResult": "pass"
     }
   }
 }
