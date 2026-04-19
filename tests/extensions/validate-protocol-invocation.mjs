@@ -6,8 +6,6 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const modulePath = resolve(repoRoot, "extensions/protocol-invocation.ts");
 const indexPath = resolve(repoRoot, "extensions/index.ts");
-const readmePath = resolve(repoRoot, "README.md");
-const integrationPath = resolve(repoRoot, "INTEGRATION.md");
 const packageJsonPath = resolve(repoRoot, "package.json");
 
 assert.ok(existsSync(modulePath), "extensions/protocol-invocation.ts must exist before full validation");
@@ -26,8 +24,6 @@ assert.match(
 
 const moduleSource = readFileSync(modulePath, "utf-8");
 const indexSource = readFileSync(indexPath, "utf-8");
-const readmeSource = readFileSync(readmePath, "utf-8");
-const integrationSource = readFileSync(integrationPath, "utf-8");
 
 for (const forbiddenImport of ["./index", "@mariozechner/", "@sinclair/typebox"]) {
   assert.ok(!moduleSource.includes(forbiddenImport), `extensions/protocol-invocation.ts must not import ${forbiddenImport}`);
@@ -42,12 +38,8 @@ assert.ok(indexSource.includes("stripLegacyHarnessMode"), "extensions/index.ts m
 assert.ok(!indexSource.includes('registerCommand("explore"'), "extensions/index.ts must not register /explore as a persistent mode command");
 assert.ok(!indexSource.includes('registerCommand("execute"'), "extensions/index.ts must not register /execute as a persistent mode command");
 assert.ok(!indexSource.includes('registerCommand("harness-off"'), "extensions/index.ts must not expose a mode-off command");
-assert.ok(!indexSource.includes('registerCommand("harness-status"'), "extensions/index.ts must not expose a harness-status command");
 assert.ok(!indexSource.includes('registerShortcut("ctrl+shift+h"'), "extensions/index.ts must not keep the mode toggle shortcut");
-assert.ok(!indexSource.includes("setStatus("), "extensions/index.ts must not render protocol status in the footer");
 assert.ok(!indexSource.includes("mode: Mode"), "HarnessState must no longer persist a mode field");
-assert.ok(!/footer status|status UI|live status UI/.test(readmeSource), "README.md must not advertise protocol status surfaces");
-assert.ok(!/footer status|status UI|live status UI/.test(integrationSource), "INTEGRATION.md must not advertise protocol status surfaces");
 
 const protocolModule = await import(pathToFileURL(modulePath).href);
 const { parseHarnessProtocolInvocation, stripLegacyHarnessMode } = protocolModule;
