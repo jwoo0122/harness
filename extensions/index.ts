@@ -2,10 +2,16 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 import { isToolCallEventType } from "@mariozechner/pi-coding-agent";
 import { Container, Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  buildExecuteRoleSystemPrompt,
+  buildExecuteRoleTask,
+  buildExploreSubagentSystemPrompt,
+  buildExploreSubagentTask,
+} from "./agent-prompts.js";
+import { classifyChildBashCommand, classifyExploreBash, isAgentBrowserCommand } from "./bash-policy.js";
 import { registerCompactBuiltinToolRenderers } from "./compact-tool-renderers.js";
+import { readRegistry, writeRegistry } from "./verification-registry.js";
 import {
   type HarnessSubagentRunResult,
   type HarnessSubagentSnapshot,
@@ -19,7 +25,7 @@ import {
 
 type Mode = "explore" | "execute" | "off";
 type SearchBackend = "duckduckgo" | "searxng" | "tavily";
-type ExplorePersona = "OPT" | "PRA" | "SKP";
+type ExplorePersona = "OPT" | "PRA" | "SKP" | "EMP";
 type ExecuteRole = "PLN" | "IMP" | "VER";
 
 interface ACStatus {
@@ -225,27 +231,6 @@ interface WebSearchResult {
 
 // ─── Verification Registry ───────────────────────────────────────────
 
-interface VerificationEntry {
-  requirement: string;
-  source?: string;
-  verification: {
-    strategy: string;
-    command?: string;
-    files?: string[];
-    description: string;
-  };
-  registeredAt: string;
-  lastVerifiedAt?: string;
-  lastResult?: "pass" | "fail";
-}
-
-interface VerificationRegistry {
-  $schema: string;
-  entries: Record<string, VerificationEntry>;
-}
-
-const REGISTRY_DIR = ".harness";
-const REGISTRY_FILE = "verification-registry.json";
 const CURRENT_EXTENSION_PATH = fileURLToPath(import.meta.url);
 const IS_SUBAGENT_CHILD = process.env.HARNESS_SUBAGENT_CHILD === "1";
 const CHILD_SUBAGENT_ROLE = process.env.HARNESS_SUBAGENT_ROLE ?? "";
@@ -298,247 +283,85 @@ const HARNESS_SUBAGENT_RECORD_TYPE = "harness-subagent-record";
 const MAX_SUBAGENT_RECORD_OUTPUT_PREVIEW_CHARS = 200;
 const MAX_SUBAGENT_RECORD_STDERR_PREVIEW_CHARS = 160;
 
-const EXPLORE_SUBAGENT_ROLES: Array<{
+interface ExploreSubagentRoleDefinition {
   persona: ExplorePersona;
   label: string;
   icon: string;
-  stance: string;
-  challengeFocus: string;
-}> = [
+  promptPath: string;
+  activeTools: string[];
+  bashPolicy: SubagentBashPolicy;
+}
+
+interface ExecuteSubagentRoleDefinition {
+  role: ExecuteRole;
+  label: string;
+  icon: string;
+  promptPath: string;
+  activeTools: string[];
+  bashPolicy: SubagentBashPolicy;
+}
+
+const EXPLORE_SUBAGENT_ROLES: ExploreSubagentRoleDefinition[] = [
   {
     persona: "OPT",
     label: "Optimist",
     icon: "🔴",
-    stance: "Push for upside, leverage, compounding effects, and the strongest ambitious path.",
-    challengeFocus: "Explain what becomes possible if the team accepts more short-term complexity.",
+    promptPath: "agents/OPT.md",
+    activeTools: ["read", "grep", "find", "ls", "harness_web_search", "harness_web_fetch"],
+    bashPolicy: "read-only",
   },
   {
     persona: "PRA",
     label: "Pragmatist",
     icon: "🟡",
-    stance: "Focus on what actually ships, sequencing, effort/reward, and reversible decisions.",
-    challengeFocus: "Explain the smallest viable path that preserves most of the upside.",
+    promptPath: "agents/PRA.md",
+    activeTools: ["read", "grep", "find", "ls", "harness_web_search", "harness_web_fetch"],
+    bashPolicy: "read-only",
   },
   {
     persona: "SKP",
     label: "Skeptic",
     icon: "🟢",
-    stance: "Pressure-test assumptions, failure modes, operational burden, and hidden constraints.",
-    challengeFocus: "Explain what is likely to break and what evidence is still missing.",
+    promptPath: "agents/SKP.md",
+    activeTools: ["read", "grep", "find", "ls", "harness_web_search", "harness_web_fetch"],
+    bashPolicy: "read-only",
+  },
+  {
+    persona: "EMP",
+    label: "Empiricist",
+    icon: "🔵",
+    promptPath: "agents/EMP.md",
+    activeTools: ["read", "grep", "find", "ls", "harness_web_search", "harness_web_fetch"],
+    bashPolicy: "read-only",
   },
 ];
 
-const EXECUTE_SUBAGENT_ROLES: Array<{
-  role: ExecuteRole;
-  label: string;
-  icon: string;
-  activeTools: string[];
-  bashPolicy: SubagentBashPolicy;
-  mission: string;
-  outputFormat: string[];
-}> = [
+const EXECUTE_SUBAGENT_ROLES: ExecuteSubagentRoleDefinition[] = [
   {
     role: "PLN",
     label: "Planner",
     icon: "📋",
+    promptPath: "agents/PLN.md",
     activeTools: ["read", "grep", "find", "ls", "harness_web_search", "harness_web_fetch"],
     bashPolicy: "read-only",
-    mission: "Decide what to build and in what order. Decompose work, cover ACs, and challenge gaps.",
-    outputFormat: [
-      "## Plan",
-      "## AC coverage",
-      "## Risks / dependencies",
-      "## Challenges to IMP and VER",
-    ],
   },
   {
     role: "IMP",
     label: "Implementer",
     icon: "🔨",
+    promptPath: "agents/IMP.md",
     activeTools: ["read", "bash", "edit", "write", "grep", "find", "ls"],
     bashPolicy: "implement",
-    mission: "Implement the requested increment only. Report changes and concerns, but never declare ACs passed.",
-    outputFormat: [
-      "## Implementation summary",
-      "## Files changed",
-      "## Commands run",
-      "## Known concerns / handoff to VER",
-    ],
   },
   {
     role: "VER",
     label: "Verifier",
     icon: "✅",
+    promptPath: "agents/VER.md",
     activeTools: ["read", "bash", "grep", "find", "ls"],
     bashPolicy: "verify",
-    mission: "Run gates, verify AC evidence, detect regressions, and challenge unsupported completion claims.",
-    outputFormat: [
-      "## Gate results",
-      "## Verification evidence",
-      "## AC verdict",
-      "## Regressions / blockers / challenges",
-    ],
   },
 ];
-
-const READ_ONLY_BASH_PREFIXES = [
-  "ls",
-  "head",
-  "tail",
-  "wc",
-  "grep",
-  "rg",
-  "ag",
-  "find",
-  "tree",
-  "file",
-  "stat",
-  "du",
-  "df",
-  "echo",
-  "printf",
-  "date",
-  "which",
-  "where",
-  "type",
-  "env",
-  "printenv",
-  "uname",
-  "pwd",
-  "sort",
-  "cut",
-  "awk",
-  "jq",
-  "git log",
-  "git show",
-  "git diff",
-  "git status",
-  "git branch",
-  "git tag",
-  "git remote",
-  "git rev-parse",
-  "git grep",
-  "cargo search",
-  "cargo doc",
-  "rustup show",
-  "npm search",
-  "npm info",
-  "npm view",
-  "pnpm search",
-  "pnpm info",
-  "pip show",
-  "pip list",
-  "agent-browser",
-  "npx agent-browser",
-];
-
-const MUTATING_BASH_PREFIXES = [
-  "rm",
-  "mv",
-  "cp",
-  "mkdir",
-  "touch",
-  "chmod",
-  "chown",
-  "git add",
-  "git commit",
-  "git push",
-  "git pull",
-  "git merge",
-  "git rebase",
-  "git switch",
-  "git checkout",
-  "git restore",
-  "cargo build",
-  "cargo run",
-  "cargo test",
-  "cargo install",
-  "cargo xtask",
-  "npm run",
-  "npm install",
-  "npm ci",
-  "yarn",
-  "pnpm install",
-  "pnpm add",
-  "make",
-  "cmake",
-  "python",
-  "node",
-  "deno",
-  "bun run",
-  "docker",
-  "kubectl",
-];
-
-const RAW_NETWORK_BASH_PREFIXES = [
-  "curl",
-  "wget",
-  "http",
-  "https",
-  "xh",
-  "lynx",
-  "links",
-  "elinks",
-];
-
-const VERIFY_BASH_PREFIXES = [
-  ...READ_ONLY_BASH_PREFIXES,
-  "cargo test",
-  "cargo build",
-  "cargo check",
-  "cargo clippy",
-  "cargo fmt",
-  "npm test",
-  "npm run",
-  "pnpm test",
-  "pnpm run",
-  "yarn test",
-  "yarn run",
-  "bun test",
-  "bun run",
-  "deno test",
-  "deno check",
-  "pytest",
-  "python -m pytest",
-  "python -m unittest",
-  "jest",
-  "vitest",
-  "eslint",
-  "prettier",
-  "tsc",
-  "ruff",
-  "mypy",
-  "go test",
-  "go build",
-  "go vet",
-  "gradle test",
-  "gradle build",
-  "./gradlew test",
-  "./gradlew build",
-  "mvn test",
-  "mvn verify",
-  "mvn package",
-  "make test",
-  "make build",
-  "make check",
-  "make lint",
-  "make verify",
-];
-
-async function readRegistry(cwd: string): Promise<VerificationRegistry> {
-  try {
-    const content = await readFile(join(cwd, REGISTRY_DIR, REGISTRY_FILE), "utf-8");
-    return JSON.parse(content);
-  } catch {
-    return { $schema: "harness-verification-registry-v1", entries: {} };
-  }
-}
-
-async function writeRegistry(cwd: string, registry: VerificationRegistry): Promise<void> {
-  const dir = join(cwd, REGISTRY_DIR);
-  await mkdir(dir, { recursive: true });
-  await writeFile(join(cwd, REGISTRY_DIR, REGISTRY_FILE), JSON.stringify(registry, null, 2) + "\n", "utf-8");
-}
 
 // ─── Web search helpers ──────────────────────────────────────────────
 
@@ -624,57 +447,6 @@ function modelToCliSpec(model: { provider?: string; id?: string } | undefined): 
   return `${model.provider}/${model.id}`;
 }
 
-function buildExploreSubagentSystemPrompt(
-  role: { persona: ExplorePersona; label: string; stance: string; challengeFocus: string },
-): string {
-  return [
-    "[HARNESS EXPLORE SUBAGENT]",
-    `You are ${role.persona} (${role.label}) in an isolated explore subagent.`,
-    role.stance,
-    `Primary challenge focus: ${role.challengeFocus}`,
-    "",
-    "Operating rules:",
-    "- You are a real isolated subagent, not a role-played paragraph in the main context.",
-    "- Use only read-only local inspection and structured web evidence tools.",
-    "- You MUST use harness_web_search at least once before making ecosystem or prior-art claims.",
-    "- You MUST use harness_web_fetch on at least one URL you intend to rely on.",
-    "- External claims without explicit URL citations are forbidden.",
-    "- Local codebase claims should cite file paths.",
-    "- Do not write files, edit code, or suggest implementation as already decided.",
-    "- Return concise markdown with citations inline.",
-  ].join("\n");
-}
-
-function buildExploreSubagentTask(
-  role: { persona: ExplorePersona; label: string; icon: string },
-  topic: string,
-  projectContext?: string,
-): string {
-  return [
-    `${role.icon} ${role.persona} isolated explore pass`,
-    "",
-    `Topic: ${topic}`,
-    projectContext ? `Project context: ${projectContext}` : "",
-    "",
-    "Required workflow:",
-    "1. Briefly inspect the relevant local codebase/docs if helpful.",
-    "2. Search the web for external evidence relevant to the topic.",
-    "3. Fetch at least one strong source you plan to cite.",
-    "4. Produce your position in markdown.",
-    "",
-    "Required output format:",
-    `## ${role.persona} thesis`,
-    "## Evidence",
-    "- Local: [file-path] claim",
-    "- External: [URL] claim",
-    "## Attacks on the other two personas",
-    "## Surviving recommendation",
-    "## Confidence",
-    "",
-    "Any claim without a file path or URL must be marked [UNVERIFIED].",
-  ].filter(Boolean).join("\n");
-}
-
 function summarizeExploreSubagentProgress(details: ExploreSubagentToolDetails): string {
   const completedLabels = details.results.map((result) => result.persona).join(", ") || "none";
   return `Running explore subagents in ${details.mode} for \"${details.topic}\" — ${details.completed}/${details.total} complete (${completedLabels})`;
@@ -707,47 +479,6 @@ function formatExploreSubagentResults(details: ExploreSubagentToolDetails): stri
 
   lines.push("Use these isolated subagent positions as Round-1 inputs, then continue the debate and synthesize only what survives with citations.");
   return lines.join("\n");
-}
-
-function buildExecuteRoleSystemPrompt(
-  role: { role: ExecuteRole; label: string; mission: string; outputFormat: string[] },
-): string {
-  const prohibitions = role.role === "PLN"
-    ? ["Do not write code.", "Do not mark ACs as passed.", "Do not run mutating commands."]
-    : role.role === "IMP"
-      ? ["Do not mark ACs as passed.", "Do not commit or push git changes.", "Stay inside the assigned implementation scope."]
-      : ["Do not write production code.", "Do not change the increment plan.", "Do not hand-wave. Show evidence."];
-
-  return [
-    "[HARNESS EXECUTE SUBAGENT]",
-    `You are ${role.role} (${role.label}) in an isolated execute subagent.`,
-    role.mission,
-    "",
-    "Operating rules:",
-    "- You are a real isolated subagent, not an internal monologue of the parent agent.",
-    ...prohibitions.map((line) => `- ${line}`),
-    "- Report in markdown only.",
-    "- If evidence is missing, say so explicitly.",
-    "- If you are blocked, describe the exact blocker and next handoff needed.",
-    "",
-    "Required sections:",
-    ...role.outputFormat.map((section) => `- ${section}`),
-  ].join("\n");
-}
-
-function buildExecuteRoleTask(
-  role: { role: ExecuteRole; label: string; icon: string },
-  objective: string,
-  context?: string,
-): string {
-  return [
-    `${role.icon} ${role.role} isolated execute pass`,
-    "",
-    `Objective: ${objective}`,
-    context ? `Context: ${context}` : "",
-    "",
-    "Stay in role. Use tools only if needed. Return concise markdown.",
-  ].filter(Boolean).join("\n");
 }
 
 function buildHarnessSubagentSystemPrompt(subagent: Pick<HarnessSubagentDefinition, "role" | "label" | "systemPrompt">): string {
@@ -2003,111 +1734,6 @@ function extractUrlsFromText(text: string): string[] {
 
 // ─── Explore bash enforcement helpers ─────────────────────────────────
 
-function isAgentBrowserCommand(command: string): boolean {
-  const trimmed = command.trim();
-  return trimmed.startsWith("agent-browser") || trimmed.startsWith("npx agent-browser");
-}
-
-function classifyExploreBash(command: string): { allowed: boolean; reason?: string } {
-  const trimmed = command.trim();
-  if (!trimmed) {
-    return { allowed: false, reason: "Empty bash command." };
-  }
-
-  if ((/[;&>|]/.test(trimmed) || /\btee\b/.test(trimmed)) && !isAgentBrowserCommand(trimmed)) {
-    return {
-      allowed: false,
-      reason: "Compound bash commands, pipes, and redirects are blocked in explore mode. Use structured tools or a single read-only command.",
-    };
-  }
-
-  for (const prefix of RAW_NETWORK_BASH_PREFIXES) {
-    if (trimmed.startsWith(prefix)) {
-      return {
-        allowed: false,
-        reason: "Raw network bash commands are blocked in explore mode. Use harness_web_search for discovery and harness_web_fetch for source inspection so external evidence remains auditable.",
-      };
-    }
-  }
-
-  for (const prefix of MUTATING_BASH_PREFIXES) {
-    if (trimmed.startsWith(prefix)) {
-      return {
-        allowed: false,
-        reason: `This bash command appears to mutate state (matched prefix: ${prefix}). Explore mode is strictly read-only.`,
-      };
-    }
-  }
-
-  for (const prefix of READ_ONLY_BASH_PREFIXES) {
-    if (trimmed.startsWith(prefix)) {
-      return { allowed: true };
-    }
-  }
-
-  return {
-    allowed: false,
-    reason: "Unknown bash command in explore mode. Use read/grep/find/ls for local inspection, or harness_web_search / harness_web_fetch for external research.",
-  };
-}
-
-function classifyExecuteBash(command: string): { allowed: boolean; reason?: string } {
-  const trimmed = command.trim();
-  if (!trimmed) {
-    return { allowed: false, reason: "Empty bash command." };
-  }
-
-  if (/[;&>|]/.test(trimmed) || /\btee\b/.test(trimmed)) {
-    return {
-      allowed: false,
-      reason: "Compound bash commands, pipes, and redirects are blocked for execute subagents. Run one verification/build command per tool call.",
-    };
-  }
-
-  for (const prefix of RAW_NETWORK_BASH_PREFIXES) {
-    if (trimmed.startsWith(prefix)) {
-      return {
-        allowed: false,
-        reason: "Raw network bash commands are blocked for execute subagents.",
-      };
-    }
-  }
-
-  for (const prefix of MUTATING_BASH_PREFIXES) {
-    if (trimmed.startsWith(prefix)) {
-      return {
-        allowed: false,
-        reason: `This bash command is blocked for execute subagents (matched prefix: ${prefix}). Use edit/write for code changes and reserve git mutations for harness_commit.`,
-      };
-    }
-  }
-
-  for (const prefix of VERIFY_BASH_PREFIXES) {
-    if (trimmed.startsWith(prefix)) {
-      return { allowed: true };
-    }
-  }
-
-  return {
-    allowed: false,
-    reason: "Unknown execute-mode bash command. Use focused build/test/lint/typecheck commands, or read/grep/find/ls for inspection.",
-  };
-}
-
-function classifyChildBashCommand(policy: SubagentBashPolicy, command: string): { allowed: boolean; reason?: string } {
-  switch (policy) {
-    case "none":
-      return { allowed: false, reason: "This subagent is not allowed to use bash." };
-    case "read-only":
-      return classifyExploreBash(command);
-    case "verify":
-    case "implement":
-      return classifyExecuteBash(command);
-    default:
-      return { allowed: false, reason: `Unknown child bash policy: ${policy}` };
-  }
-}
-
 function createExploreEvidenceTotals(): ExploreEvidenceTotals {
   return {
     searches: 0,
@@ -2417,7 +2043,7 @@ export default function (pi: ExtensionAPI) {
   // ── Mode switching commands ───────────────────────────────────────
 
   pi.registerCommand("explore", {
-    description: "Switch to divergent thinking mode (3-persona debate)",
+    description: "Switch to divergent thinking mode (4-persona debate)",
     handler: async (args, ctx) => {
       state.mode = "explore";
       state.debateRound = 0;
@@ -2592,7 +2218,7 @@ export default function (pi: ExtensionAPI) {
             "It did not show enough external evidence usage and/or explicit URL citations.",
             "",
             "Before revising, you MUST:",
-            "1. Call harness_subagents to run the isolated OPT/PRA/SKP subagents in parallel if you have not already.",
+            "1. Call harness_subagents to run the isolated OPT/PRA/SKP/EMP subagents in parallel if you have not already.",
             "2. Use harness_web_search for focused external queries when you need additional evidence beyond the subagent pass.",
             "3. Use harness_web_fetch on relevant URLs before relying on them in the synthesis.",
             "4. Revise the debate so every external claim cites explicit source URLs.",
@@ -2682,14 +2308,15 @@ export default function (pi: ExtensionAPI) {
     if (state.mode === "explore") {
       injection = `
 [COGNITIVE HARNESS: EXPLORE MODE ACTIVE]
-You are operating in divergent thinking mode with 3-persona debate.
+You are operating in divergent thinking mode with 4-persona debate.
 - 🔴 OPT (Optimist): Push for the ambitious path
 - 🟡 PRA (Pragmatist): Ground in what ships
 - 🟢 SKP (Skeptic): Find what breaks
+- 🔵 EMP (Empiricist): Demand the evidence that would settle the disagreement
 Rules: No unanimous agreement in Round 1. Evidence required from Round 2. Unsupported claims struck in Round 3.
 Local file mutation is BLOCKED.
 Structured external-evidence tools are active:
-- harness_subagents: REQUIRED isolated parallel OPT/PRA/SKP subagent pass before final synthesis. Inject OPT/PRA/SKP as subagent personas.
+- harness_subagents: REQUIRED isolated parallel OPT/PRA/SKP/EMP subagent pass before final synthesis. Inject OPT/PRA/SKP/EMP as subagent personas.
 - harness_web_search: discover ecosystem, prior-art, benchmark, and failure-mode sources.
 - harness_web_fetch: inspect source pages and cite exact URLs before relying on them.
 External-evidence policy:
@@ -2697,7 +2324,7 @@ External-evidence policy:
 - Ecosystem, library, market, benchmark, standards, prior-art, and failure-mode claims MUST be backed by external URLs.
 - Search snippets alone are not enough for key claims; fetch the strongest sources.
 - Raw network bash (curl/wget/etc.) is BLOCKED so provenance stays auditable.
-- Before producing a final /explore synthesis, you MUST call harness_subagents at least once with OPT/PRA/SKP personas.
+- Before producing a final /explore synthesis, you MUST call harness_subagents at least once with OPT/PRA/SKP/EMP personas.
 - A synthesis is not acceptable unless it cites explicit source URLs or marks a claim [UNVERIFIED].
 Evidence collected this session so far: ${exploreTotals.subagentRuns} subagent rounds, ${exploreTotals.searches} searches, ${exploreTotals.fetches} fetches, ${exploreTotals.sources.size} unique URLs.
 `;
@@ -2887,7 +2514,7 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
       "Use harness_subagents whenever you want real isolated subprocess agents instead of role-playing multiple viewpoints in one context.",
       "Inject the persona or role through each subagent's system_prompt and choose active_tools / bash_policy explicitly.",
       "Use parallel mode for independent perspectives, or sequential mode when later subagents should react to earlier outputs.",
-      "For /explore, configure OPT / PRA / SKP in parallel. For /execute, configure PLN / IMP / VER in sequential mode.",
+      "For /explore, configure OPT / PRA / SKP / EMP in parallel. For /execute, configure PLN / IMP / VER in sequential mode.",
     ],
     parameters: Type.Object({
       subject: Type.String({ description: "Shared subject, objective, or decision question for this subagent batch" }),
@@ -3024,10 +2651,10 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
   pi.registerTool({
     name: "harness_explore_subagents",
     label: "Explore Subagents",
-    description: "Deprecated compatibility alias for harness_subagents preconfigured with OPT/PRA/SKP personas.",
-    promptSnippet: "Compatibility alias: use harness_subagents for new code; this launches OPT/PRA/SKP in parallel.",
+    description: "Deprecated compatibility alias for harness_subagents preconfigured with OPT/PRA/SKP/EMP personas.",
+    promptSnippet: "Compatibility alias: use harness_subagents for new code; this launches OPT/PRA/SKP/EMP in parallel.",
     promptGuidelines: [
-      "Prefer harness_subagents for new code. This alias remains for backward compatibility and launches OPT/PRA/SKP in parallel.",
+      "Prefer harness_subagents for new code. This alias remains for backward compatibility and launches OPT/PRA/SKP/EMP in parallel.",
       "Pass a concise topic and optional project context summary so each subagent can research independently.",
       "Use the returned citations directly in the final debate transcript and synthesis.",
     ],
@@ -3049,8 +2676,8 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
         task: buildExploreSubagentTask(role, params.topic, params.project_context),
         systemPrompt: buildExploreSubagentSystemPrompt(role),
         cwd: ctx.cwd,
-        activeTools: ["read", "grep", "find", "ls", "harness_web_search", "harness_web_fetch"],
-        bashPolicy: "read-only",
+        activeTools: role.activeTools,
+        bashPolicy: role.bashPolicy,
         extensionPath: CURRENT_EXTENSION_PATH,
         modelSpec,
         thinkingLevel,
@@ -3102,7 +2729,7 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
     renderCall(args, theme, context) {
       const topic = summarizeSubagentText(args.topic, MAX_SUBAGENT_CALL_PREVIEW_CHARS) || "...";
       return new Text(
-        `${compactToolTitle(theme, context, "explore_subagents")} ${theme.fg("accent", topic)}${theme.fg("muted", " · OPT/PRA/SKP · parallel")}`,
+        `${compactToolTitle(theme, context, "explore_subagents")} ${theme.fg("accent", topic)}${theme.fg("muted", " · OPT/PRA/SKP/EMP · parallel")}`, 
         0,
         0,
       );

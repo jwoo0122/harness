@@ -10,7 +10,7 @@ You are now in **convergent mode** with a **three-role agent system**.
 
 Arguments: $ARGUMENTS — path to criteria/requirements file, or milestone name. If blank, look for the most recent criteria/requirements document in the project.
 
-> **Harness note:** This skill is project-agnostic. When running inside pi with the `@jwoo0122/harness` extension, AC status is persisted across sessions, the parent `/execute` agent becomes an orchestrator, and real isolated subagents should be invoked through the generic `harness_subagents` tool instead of role-playing every function in one context. PLN / IMP / VER are injected by this skill as role-specific subagent configurations.
+> **Harness note:** This skill is project-agnostic. When running inside pi with the `@jwoo0122/harness` extension, AC status is persisted across sessions, the parent `/execute` agent becomes an orchestrator, and real isolated subagents should be invoked through the generic `harness_subagents` tool instead of role-playing every function in one context. PLN / IMP / VER are injected by this skill as role-specific subagent configurations. In the package extension, the canonical prompt bodies for those roles live in the flat `agents/` directory.
 
 ---
 

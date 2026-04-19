@@ -8,16 +8,17 @@ Two-mode cognitive harness for AI coding agents — divergent exploration, conve
 
 | Mode | Skill | Personas / Roles | Purpose |
 |------|-------|------------------|---------|
-| **Explore** | `/explore` | 🔴 Optimist · 🟡 Pragmatist · 🟢 Skeptic | Divergent thinking — expand the space, surface options, force debate |
+| **Explore** | `/explore` | 🔴 Optimist · 🟡 Pragmatist · 🟢 Skeptic · 🔵 Empiricist | Divergent thinking — expand the space, surface options, force debate |
 | **Execute** | `/execute` | 📋 Planner · 🔨 Implementer · ✅ Verifier | Convergent delivery — ship in increments, verify rigorously |
 
 The important architectural change is this:
 
 - **`/explore` and `/execute` are domain protocols**.
 - **`harness_subagents` is the generic runtime primitive**.
-- Personas like `OPT / PRA / SKP` or roles like `PLN / IMP / VER` are **injected at call time** through per-subagent prompts, tool policies, and sequencing.
+- Personas like `OPT / PRA / SKP / EMP` or roles like `PLN / IMP / VER` are **injected at call time** through per-subagent prompts, tool policies, and sequencing.
 
 That keeps the subprocess runtime generic while letting skills define the mental model.
+Canonical prompt bodies for the shipped personas and roles live in the flat `agents/` directory.
 
 ## Why isolated subagents
 
@@ -28,7 +29,7 @@ Harness counters that by separating:
 - the **runtime** layer (`harness_subagents`).
 
 Examples:
-- In **Explore**, the extension can launch three real isolated subagents configured as OPT / PRA / SKP before synthesis.
+- In **Explore**, the extension can launch four real isolated subagents configured as OPT / PRA / SKP / EMP before synthesis.
 - In **Execute**, the extension can launch real isolated subagents configured as PLN → IMP → VER so scope, implementation, and verification stay separated.
 
 ## Installation
@@ -85,7 +86,7 @@ The Markdown skills work standalone without the pi extension. You lose enforceme
 
 Expected runtime shape inside pi:
 1. gather read-only local context
-2. call `harness_subagents` with **OPT / PRA / SKP** in **parallel**
+2. call `harness_subagents` with **OPT / PRA / SKP / EMP** in **parallel**
 3. research external evidence with `harness_web_search` / `harness_web_fetch`
 4. run the 3-round debate
 5. write the synthesis document to `target/explore/`
@@ -148,11 +149,22 @@ harness/
 ├── INTEGRATION.md
 ├── README.md
 ├── extensions/
-│   ├── index.ts          # mode management, gating, tools, registry, status UI
-│   └── subagents.ts      # generic isolated subprocess runtime
+│   ├── agent-prompts.ts         # prompt loading + explore/execute prompt builders
+│   ├── bash-policy.ts           # explore/execute bash classification helpers
+│   ├── verification-registry.ts # registry storage model + file I/O
+│   ├── index.ts                 # extension composition root, mode management, gating, tools, registry, status UI
+│   └── subagents.ts             # generic isolated subprocess runtime
 ├── prompts/
 │   ├── debate.md
 │   └── ac-check.md
+├── agents/
+│   ├── OPT.md
+│   ├── PRA.md
+│   ├── SKP.md
+│   ├── EMP.md
+│   ├── PLN.md
+│   ├── IMP.md
+│   └── VER.md
 └── skills/
     ├── explore/SKILL.md
     └── execute/SKILL.md

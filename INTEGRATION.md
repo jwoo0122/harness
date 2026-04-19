@@ -24,9 +24,10 @@ The host project provides the **domain-specific verification implementation**.
 - `harness_subagents` is the generic isolated subprocess primitive.
 - `/explore` and `/execute` decide **which personas / roles** should be injected.
 - The runtime itself should stay generic; the skill defines the worldview.
+- Canonical prompt bodies for shipped personas and roles live in the flat `agents/` directory.
 
 Examples:
-- `/explore` → run `harness_subagents` with OPT / PRA / SKP in parallel
+- `/explore` → run `harness_subagents` with OPT / PRA / SKP / EMP in parallel
 - `/execute` → run `harness_subagents` with PLN → IMP → VER sequentially
 
 Compatibility aliases still exist for older flows:
@@ -144,7 +145,7 @@ When the harness extension is active:
 When the harness extension is active:
 - keep explore read-only
 - delegate first-pass viewpoints to `harness_subagents`
-- configure OPT / PRA / SKP with explicit persona prompts
+- configure OPT / PRA / SKP / EMP with explicit persona prompts
 - run them in **parallel** mode
 - require structured web evidence before final synthesis
 

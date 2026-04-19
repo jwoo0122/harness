@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- `EMP` as a first-class `/explore` persona alongside `OPT / PRA / SKP`
+- flat `agents/` directory with one Markdown prompt body per shipped subagent (`OPT`, `PRA`, `SKP`, `EMP`, `PLN`, `IMP`, `VER`)
+
+### Changed
+- the extension now loads canonical explore/execute subagent prompt bodies from `agents/*.md`
+- prompt loading and explore/execute prompt builders have been extracted from `extensions/index.ts` into `extensions/agent-prompts.ts`
+- bash-policy classification helpers have been extracted from `extensions/index.ts` into `extensions/bash-policy.ts`
+- verification registry storage types and file I/O have been extracted from `extensions/index.ts` into `extensions/verification-registry.ts`
+- `/explore`, docs, and prompt templates now reference the four-persona debate shape
+
 ## 0.2.0 - 2026-04-18
 
 ### Added

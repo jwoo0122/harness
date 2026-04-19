@@ -12,10 +12,65 @@
           "README.md",
           "INTEGRATION.md"
         ],
-        "description": "Regression re-check of verification-registry plumbing after INC-4: update the existing AC entry via harness_verify_register, then confirm harness_verify_list still returns cumulative entries in execute mode after persisted subagent record changes in extensions/index.ts."
+        "description": "Regression re-check of verification-registry plumbing after extension refactors: confirm the verify-register and verify-list tool definitions still exist in extensions/index.ts and remain documented in README.md and INTEGRATION.md. Full live execute-mode tool invocation remains a manual harness check."
       },
       "registeredAt": "INC-1",
-      "lastVerifiedAt": "INC-4",
+      "lastVerifiedAt": "INC-7",
+      "lastResult": "pass"
+    },
+    "AC-5.3": {
+      "requirement": "Prompt seam is extracted into a leaf module and remains validation-backed",
+      "source": ".iteration-5-criteria.md",
+      "verification": {
+        "strategy": "automated-test",
+        "command": "npm run validate:extensions",
+        "files": [
+          "extensions/agent-prompts.ts",
+          "tests/extensions/validate-agent-prompts.mjs",
+          "package.json",
+          "extensions/index.ts"
+        ],
+        "description": "Runs the extension validation chain, including the prompt-seam syntax and contract checks that confirm agent-prompts extraction and root wiring parity."
+      },
+      "registeredAt": "INC-7",
+      "lastVerifiedAt": "INC-7",
+      "lastResult": "pass"
+    },
+    "AC-6.3": {
+      "requirement": "Verification registry storage seam is extracted into a leaf module and remains validation-backed",
+      "source": ".iteration-6-criteria.md",
+      "verification": {
+        "strategy": "automated-test",
+        "command": "npm run validate:extensions",
+        "files": [
+          "extensions/verification-registry.ts",
+          "tests/extensions/validate-verification-registry.mjs",
+          "package.json",
+          "extensions/index.ts"
+        ],
+        "description": "Runs the extension validation chain, including registry round-trip and source-shape checks that confirm verification-registry extraction and parity."
+      },
+      "registeredAt": "INC-7",
+      "lastVerifiedAt": "INC-7",
+      "lastResult": "pass"
+    },
+    "AC-7.3": {
+      "requirement": "Bash-policy seam is extracted into a dedicated module with behavior parity validation",
+      "source": ".iteration-7-criteria.md",
+      "verification": {
+        "strategy": "automated-test",
+        "command": "npm run validate:extensions",
+        "files": [
+          "extensions/bash-policy.ts",
+          "tests/extensions/validate-bash-policy.mjs",
+          "tests/extensions/validate-verification-registry.mjs",
+          "package.json",
+          "extensions/index.ts"
+        ],
+        "description": "Runs the extension validation chain, including bash-policy behavioral parity checks, source-shape extraction checks, and forward-compatible validator-chain checks."
+      },
+      "registeredAt": "INC-7",
+      "lastVerifiedAt": "INC-7",
       "lastResult": "pass"
     }
   }

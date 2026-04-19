@@ -13,6 +13,7 @@
     "extensions",
     "skills",
     "prompts",
+    "agents",
     "README.md",
     "INTEGRATION.md",
     "CHANGELOG.md",
@@ -22,6 +23,10 @@
     "extensions": ["./extensions/index.ts"],
     "skills": ["./skills"],
     "prompts": ["./prompts"]
+  },
+  "scripts": {
+    "validate:extensions:prepare": "node tests/extensions/prepare-bash-policy.mjs",
+    "validate:extensions": "node --experimental-strip-types --check extensions/index.ts && node --experimental-strip-types --check extensions/agent-prompts.ts && node --experimental-strip-types --check extensions/bash-policy.ts && node --experimental-strip-types --check extensions/verification-registry.ts && node --experimental-strip-types --check extensions/subagents.ts && node --experimental-strip-types tests/extensions/validate-agent-prompts.mjs && node --experimental-strip-types tests/extensions/validate-verification-registry.mjs && node --experimental-strip-types tests/extensions/validate-bash-policy.mjs"
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "*",
