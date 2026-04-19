@@ -94,10 +94,10 @@ The host project can still add its own skills, for example:
 
 As long as names differ, they coexist cleanly.
 
-## How execute mode should integrate with project verification
+## How the execute protocol should integrate with project verification
 
 The package does **not** encode project-specific verification commands.
-Instead, execute mode should use project knowledge to decide which verification to run.
+Instead, the execute protocol should use project knowledge to decide which verification to run.
 
 Typical pattern:
 - generic harness handles increment planning / implementation / verification separation
@@ -110,7 +110,7 @@ Examples:
 
 ## Verification registry plumbing
 
-Execute mode maintains a cumulative verification registry at:
+The execute protocol maintains a cumulative verification registry at:
 
 ```text
 .harness/verification-registry.json
@@ -129,9 +129,9 @@ Expected smoke behavior:
 This package provides the registry mechanism.
 The host project provides the concrete verification commands worth recording.
 
-## Recommended integration shape for execute mode
+## Recommended integration shape for the execute protocol
 
-When the harness extension is active:
+When the harness extension is active for a `/execute` run:
 - keep the parent `/execute` agent orchestration-only
 - delegate role work to `harness_subagents`
 - configure subagents roughly as:
@@ -140,9 +140,9 @@ When the harness extension is active:
   - VER → verification tools
 - run them in **sequential** mode so each role can react to previous output
 
-## Recommended integration shape for explore mode
+## Recommended integration shape for the explore protocol
 
-When the harness extension is active:
+When the harness extension is active for an `/explore` run:
 - keep explore read-only
 - delegate first-pass viewpoints to `harness_subagents`
 - configure OPT / PRA / SKP / EMP with explicit persona prompts

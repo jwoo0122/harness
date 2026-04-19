@@ -158,7 +158,7 @@ export function classifyExploreBash(command: string): { allowed: boolean; reason
   if ((/[;&>|]/.test(trimmed) || /\btee\b/.test(trimmed)) && !isAgentBrowserCommand(trimmed)) {
     return {
       allowed: false,
-      reason: "Compound bash commands, pipes, and redirects are blocked in explore mode. Use structured tools or a single read-only command.",
+      reason: "Compound bash commands, pipes, and redirects are blocked during /explore. Use structured tools or a single read-only command.",
     };
   }
 
@@ -166,7 +166,7 @@ export function classifyExploreBash(command: string): { allowed: boolean; reason
     if (trimmed.startsWith(prefix)) {
       return {
         allowed: false,
-        reason: "Raw network bash commands are blocked in explore mode. Use harness_web_search for discovery and harness_web_fetch for source inspection so external evidence remains auditable.",
+        reason: "Raw network bash commands are blocked during /explore. Use harness_web_search for discovery and harness_web_fetch for source inspection so external evidence remains auditable.",
       };
     }
   }
@@ -175,7 +175,7 @@ export function classifyExploreBash(command: string): { allowed: boolean; reason
     if (trimmed.startsWith(prefix)) {
       return {
         allowed: false,
-        reason: `This bash command appears to mutate state (matched prefix: ${prefix}). Explore mode is strictly read-only.`,
+        reason: `This bash command appears to mutate state (matched prefix: ${prefix}). /explore is strictly read-only.`,
       };
     }
   }
@@ -188,7 +188,7 @@ export function classifyExploreBash(command: string): { allowed: boolean; reason
 
   return {
     allowed: false,
-    reason: "Unknown bash command in explore mode. Use read/grep/find/ls for local inspection, or harness_web_search / harness_web_fetch for external research.",
+    reason: "Unknown bash command during /explore. Use read/grep/find/ls for local inspection, or harness_web_search / harness_web_fetch for external research.",
   };
 }
 
@@ -231,7 +231,7 @@ export function classifyExecuteBash(command: string): { allowed: boolean; reason
 
   return {
     allowed: false,
-    reason: "Unknown execute-mode bash command. Use focused build/test/lint/typecheck commands, or read/grep/find/ls for inspection.",
+    reason: "Unknown /execute bash command. Use focused build/test/lint/typecheck commands, or read/grep/find/ls for inspection.",
   };
 }
 

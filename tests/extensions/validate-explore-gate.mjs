@@ -41,12 +41,12 @@ assert.equal(
 );
 assert.equal(
   (indexSource.match(/deliverAs: "followUp"/g) ?? []).length,
-  2,
-  "extensions/index.ts should keep followUp delivery only for /explore and /execute command dispatch",
+  0,
+  "extensions/index.ts should no longer dispatch skill followUps for /explore or /execute",
 );
 assert.ok(indexSource.includes("CHILD_SUBAGENT_MODE"), "extensions/index.ts must consume HARNESS_SUBAGENT_MODE");
 assert.ok(
-  indexSource.includes("[HARNESS SUBAGENT: EXPLORE CHILD MODE ACTIVE]"),
+  indexSource.includes("[HARNESS SUBAGENT: EXPLORE CHILD PROTOCOL ACTIVE]"),
   "extensions/index.ts must inject a child-safe explore prompt",
 );
 for (const removedMarker of [

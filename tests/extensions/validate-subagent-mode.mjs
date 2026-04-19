@@ -23,8 +23,8 @@ assert.ok(
   "runHarnessSubagentProcess must forward spec.mode through HARNESS_SUBAGENT_MODE",
 );
 assert.ok(
-  indexSource.includes("resolveGenericSubagentChildMode(getRuntimeMode())"),
-  "harness_subagents must derive child mode from the current runtime",
+  indexSource.includes("resolveGenericSubagentChildMode(getRuntimeProtocol())"),
+  "harness_subagents must derive child mode from the current runtime protocol",
 );
 assert.ok(
   indexSource.includes("mode: genericSubagentChildMode,"),
@@ -36,14 +36,14 @@ const { resolveGenericSubagentChildMode } = await import(pathToFileURL(subagents
 assert.equal(
   resolveGenericSubagentChildMode("explore"),
   "explore",
-  "generic harness_subagents must preserve explore child behavior while the parent is in explore mode",
+  "generic harness_subagents must preserve explore child behavior while the parent is in /explore",
 );
 
 for (const parentMode of ["generic", "execute", "off"]) {
   assert.equal(
     resolveGenericSubagentChildMode(parentMode),
     "generic",
-    `generic harness_subagents must stay generic outside explore mode (${parentMode})`,
+    `generic harness_subagents must stay generic outside explore (${parentMode})`,
   );
 }
 

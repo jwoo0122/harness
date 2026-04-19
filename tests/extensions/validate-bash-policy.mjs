@@ -105,7 +105,7 @@ assert.deepEqual(classifyExploreBash("ls -la"), { allowed: true }, "read-only ex
 
 const exploreNetwork = classifyExploreBash("curl https://example.com");
 assert.equal(exploreNetwork.allowed, false, "raw network explore command must be rejected");
-assert.match(exploreNetwork.reason ?? "", /Raw network bash commands are blocked in explore mode/);
+assert.match(exploreNetwork.reason ?? "", /Raw network bash commands are blocked during \/explore/);
 
 const exploreMutating = classifyExploreBash("rm -rf tmp");
 assert.equal(exploreMutating.allowed, false, "mutating explore command must be rejected");
@@ -113,7 +113,7 @@ assert.match(exploreMutating.reason ?? "", /matched prefix: rm/);
 
 const exploreCompound = classifyExploreBash("git status | cat");
 assert.equal(exploreCompound.allowed, false, "compound explore command must be rejected");
-assert.match(exploreCompound.reason ?? "", /Compound bash commands, pipes, and redirects are blocked in explore mode/);
+assert.match(exploreCompound.reason ?? "", /Compound bash commands, pipes, and redirects are blocked during \/explore/);
 
 assert.deepEqual(
   classifyExploreBash("agent-browser https://example.com | tee out.txt"),
@@ -123,7 +123,7 @@ assert.deepEqual(
 
 const exploreUnknown = classifyExploreBash("cat README.md");
 assert.equal(exploreUnknown.allowed, false, "unknown explore command must be rejected");
-assert.match(exploreUnknown.reason ?? "", /Unknown bash command in explore mode/);
+assert.match(exploreUnknown.reason ?? "", /Unknown bash command during \/explore/);
 
 assert.deepEqual(classifyExecuteBash("npm test"), { allowed: true }, "npm test must remain allowed in execute mode");
 assert.deepEqual(classifyExecuteBash("cargo check"), { allowed: true }, "cargo check must remain allowed in execute mode");
@@ -142,7 +142,7 @@ assert.match(executeCompound.reason ?? "", /Compound bash commands, pipes, and r
 
 const executeUnknown = classifyExecuteBash("cat README.md");
 assert.equal(executeUnknown.allowed, false, "unknown execute command must be rejected");
-assert.match(executeUnknown.reason ?? "", /Unknown execute-mode bash command/);
+assert.match(executeUnknown.reason ?? "", /Unknown \/execute bash command/);
 
 const executeOrderSentinel = classifyExecuteBash("cargo test");
 assert.equal(executeOrderSentinel.allowed, false, "overlapping execute prefix order must be preserved");

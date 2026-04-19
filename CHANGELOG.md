@@ -13,6 +13,7 @@
 - verification registry storage types and file I/O have been extracted from `extensions/index.ts` into `extensions/verification-registry.ts`
 - live subagent progress no longer renders in a separate widget; it now stays inside the subagent tool call with one line per subagent
 - `/explore`, docs, and prompt templates now reference the four-persona debate shape
+- `/explore` and `/execute` are now one-shot protocol runs instead of persistent mode switches; the extension routes skill invocations without changing long-lived agent mode state
 
 ## 0.2.0 - 2026-04-18
 

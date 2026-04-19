@@ -12,6 +12,11 @@ import {
 import { classifyChildBashCommand, classifyExploreBash, isAgentBrowserCommand } from "./bash-policy.js";
 import { registerCompactBuiltinToolRenderers } from "./compact-tool-renderers.js";
 import { evaluateExploreEvidenceGate } from "./explore-gate.js";
+import {
+  type HarnessProtocol,
+  parseHarnessProtocolInvocation,
+  stripLegacyHarnessMode,
+} from "./protocol-invocation.js";
 import { readRegistry, writeRegistry } from "./verification-registry.js";
 import {
   type HarnessSubagentRunResult,
@@ -25,7 +30,6 @@ import {
 
 // ─── Types ────────────────────────────────────────────────────────────
 
-type Mode = "explore" | "execute" | "off";
 type SearchBackend = "duckduckgo" | "searxng" | "tavily";
 type ExplorePersona = "OPT" | "PRA" | "SKP" | "EMP";
 type ExecuteRole = "PLN" | "IMP" | "VER";
@@ -38,13 +42,17 @@ interface ACStatus {
 }
 
 interface HarnessState {
-  mode: Mode;
   criteriaFile?: string;
   acStatuses: ACStatus[];
   currentIncrement?: string;
   regressionCount: number;
   debateRound?: number;
   commitCount: number;
+}
+
+interface PendingProtocolInvocation {
+  protocol: HarnessProtocol;
+  argsText: string;
 }
 
 interface ExploreEvidenceTotals {
@@ -1862,32 +1870,33 @@ export default function (pi: ExtensionAPI) {
   registerCompactBuiltinToolRenderers(pi);
 
   let state: HarnessState = {
-    mode: "off",
     acStatuses: [],
     regressionCount: 0,
     commitCount: 0,
   };
+  let activeProtocol: HarnessProtocol | undefined;
+  let pendingProtocolInvocation: PendingProtocolInvocation | undefined;
 
   let baselineActiveTools: string[] = [];
   let exploreTotals = createExploreEvidenceTotals();
   let exploreChain = createExploreEvidenceChain();
   let executeTotals = createExecuteSubagentTotals();
 
-  function getRuntimeMode(): Mode | "generic" {
+  function getRuntimeProtocol(): HarnessProtocol | "generic" {
     if (IS_SUBAGENT_CHILD) {
       return CHILD_SUBAGENT_MODE === "explore" || CHILD_SUBAGENT_MODE === "execute"
         ? CHILD_SUBAGENT_MODE
         : "generic";
     }
-    return state.mode;
+    return activeProtocol ?? "generic";
   }
 
   function isExploreRuntime(): boolean {
-    return getRuntimeMode() === "explore";
+    return getRuntimeProtocol() === "explore";
   }
 
   function isExecuteRuntime(): boolean {
-    return getRuntimeMode() === "execute";
+    return getRuntimeProtocol() === "execute";
   }
 
   function isChildExploreRuntime(): boolean {
@@ -2004,20 +2013,20 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
-  function setModeTools(mode: Mode) {
+  function setProtocolTools(protocol: HarnessProtocol | undefined) {
     const all = new Set(getAllToolNames());
 
     if (baselineActiveTools.length === 0) {
       baselineActiveTools = getActiveToolNames();
     }
 
-    if (mode === "explore") {
+    if (protocol === "explore") {
       const safe = [...SAFE_EXPLORE_TOOL_NAMES].filter((name) => all.has(name));
       pi.setActiveTools(safe);
       return;
     }
 
-    if (mode === "execute") {
+    if (protocol === "execute") {
       const safe = [...SAFE_EXECUTE_TOOL_NAMES].filter((name) => all.has(name));
       pi.setActiveTools(safe);
       return;
@@ -2032,12 +2041,51 @@ export default function (pi: ExtensionAPI) {
     pi.setActiveTools([...target].filter((name) => all.has(name)));
   }
 
+  function beginActiveProtocolRun(invocation: PendingProtocolInvocation | undefined, ctx: ExtensionContext) {
+    activeProtocol = invocation?.protocol;
+    pendingProtocolInvocation = undefined;
+
+    if (activeProtocol === "explore") {
+      state.debateRound = 0;
+      saveState();
+      resetExploreTracking();
+      resetExecuteTracking();
+      setProtocolTools("explore");
+      updateUI(ctx);
+      return;
+    }
+
+    if (activeProtocol === "execute") {
+      state.criteriaFile = invocation?.argsText || undefined;
+      state.currentIncrement = undefined;
+      state.regressionCount = 0;
+      state.commitCount = 0;
+      saveState();
+      endExploreEvidenceChain();
+      resetExecuteTracking();
+      setProtocolTools("execute");
+      updateUI(ctx);
+      return;
+    }
+
+    setProtocolTools(undefined);
+    updateUI(ctx);
+  }
+
+  function clearActiveProtocolRun(ctx: ExtensionContext) {
+    activeProtocol = undefined;
+    pendingProtocolInvocation = undefined;
+    endExploreEvidenceChain();
+    setProtocolTools(undefined);
+    updateUI(ctx);
+  }
+
   function updateUI(ctx: ExtensionContext) {
     if (IS_SUBAGENT_CHILD || !ctx.hasUI) return;
 
     ctx.ui.setWidget("harness", undefined);
 
-    if (state.mode === "explore") {
+    if (activeProtocol === "explore") {
       ctx.ui.setStatus(
         "harness",
         `🧠 EXPLORE 🤖${exploreTotals.subagentRuns} 🔎${exploreTotals.searches} 🌐${exploreTotals.fetches} 🔗${exploreTotals.sources.size}`,
@@ -2045,7 +2093,7 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    if (state.mode === "execute") {
+    if (activeProtocol === "execute") {
       const passed = state.acStatuses.filter((a) => a.status === "pass").length;
       const failed = state.acStatuses.filter((a) => a.status === "fail").length;
       const pending = state.acStatuses.filter((a) => a.status === "pending").length;
@@ -2131,7 +2179,9 @@ export default function (pi: ExtensionAPI) {
   // ── State persistence ─────────────────────────────────────────────
 
   pi.on("session_start", async (_event, ctx) => {
-    state = { mode: "off", acStatuses: [], regressionCount: 0, commitCount: 0 };
+    state = { acStatuses: [], regressionCount: 0, commitCount: 0 };
+    activeProtocol = undefined;
+    pendingProtocolInvocation = undefined;
     baselineActiveTools = getActiveToolNames();
     resetExploreTracking();
     resetExecuteTracking();
@@ -2139,93 +2189,61 @@ export default function (pi: ExtensionAPI) {
     for (const entry of ctx.sessionManager.getEntries()) {
       if (entry.type === "custom" && entry.customType === "cognitive-harness-state") {
         state = {
-          mode: "off",
           acStatuses: [],
           regressionCount: 0,
           commitCount: 0,
-          ...(entry.data as Partial<HarnessState>),
+          ...stripLegacyHarnessMode((entry.data ?? {}) as Partial<HarnessState & { mode?: unknown }>),
         };
       }
     }
 
     if (IS_SUBAGENT_CHILD) {
-      state.mode = CHILD_SUBAGENT_MODE === "explore" || CHILD_SUBAGENT_MODE === "execute"
-        ? CHILD_SUBAGENT_MODE
-        : "off";
       const childTools = (CHILD_SUBAGENT_TOOLS.length > 0 ? CHILD_SUBAGENT_TOOLS : [...SAFE_SUBAGENT_CHILD_TOOL_NAMES])
         .filter((name) => getAllToolNames().includes(name));
       pi.setActiveTools(childTools);
       return;
     }
 
-    setModeTools(state.mode);
+    setProtocolTools(undefined);
     updateUI(ctx);
   });
 
-  // ── Mode switching commands ───────────────────────────────────────
+  // ── Protocol invocation routing ───────────────────────────────────
 
-  pi.registerCommand("explore", {
-    description: "Switch to divergent thinking mode (4-persona debate)",
-    handler: async (args, ctx) => {
-      state.mode = "explore";
-      state.debateRound = 0;
-      saveState();
-      resetExploreTracking();
-      resetExecuteTracking();
-      setModeTools("explore");
-      updateUI(ctx);
-      ctx.ui.notify("🧠 Explore mode activated — isolated subagents + structured web evidence required", "info");
+  pi.on("input", async (event) => {
+    if (IS_SUBAGENT_CHILD || event.source === "extension") {
+      return { action: "continue" };
+    }
 
-      const topic = args || "next iteration";
-      pi.sendUserMessage(`/skill:explore ${topic}`, { deliverAs: "followUp" });
-    },
-  });
+    const invocation = parseHarnessProtocolInvocation(event.text);
+    pendingProtocolInvocation = invocation
+      ? { protocol: invocation.protocol, argsText: invocation.argsText }
+      : undefined;
 
-  pi.registerCommand("execute", {
-    description: "Switch to agile execution mode (3-role verification)",
-    handler: async (args, ctx) => {
-      state.mode = "execute";
-      state.criteriaFile = args || undefined;
-      state.currentIncrement = undefined;
-      state.regressionCount = 0;
-      state.commitCount = 0;
-      saveState();
-      endExploreEvidenceChain();
-      resetExecuteTracking();
-      setModeTools("execute");
-      updateUI(ctx);
-      ctx.ui.notify("⚙️ Execute mode activated — orchestration-only parent + isolated role subagents enabled", "info");
+    if (!invocation?.rewrittenText) {
+      return { action: "continue" };
+    }
 
-      const criteria = args || "";
-      pi.sendUserMessage(`/skill:execute ${criteria}`, { deliverAs: "followUp" });
-    },
-  });
-
-  pi.registerCommand("harness-off", {
-    description: "Disable cognitive harness (return to normal mode)",
-    handler: async (_args, ctx) => {
-      state.mode = "off";
-      saveState();
-      endExploreEvidenceChain();
-      resetExecuteTracking();
-      setModeTools("off");
-      updateUI(ctx);
-      ctx.ui.notify("Cognitive harness disabled", "info");
-    },
+    return {
+      action: "transform",
+      text: invocation.rewrittenText,
+    };
   });
 
   pi.registerCommand("harness-status", {
-    description: "Show current harness mode and AC status",
+    description: "Show the active harness run and stored execute state",
     handler: async (_args, ctx) => {
-      if (state.mode === "off") {
-        ctx.ui.notify("Harness is off. Use /explore or /execute to activate.", "info");
-        return;
+      const lines: string[] = [];
+      lines.push(activeProtocol
+        ? `Active protocol: ${activeProtocol}`
+        : "No active /explore or /execute run.");
+
+      if (activeProtocol === "explore") {
+        lines.push(`Debate round: ${state.debateRound ?? 0}/3`);
+        lines.push(`External evidence: 🤖 ${exploreTotals.subagentRuns} subagent rounds | 🔎 ${exploreTotals.searches} searches | 🌐 ${exploreTotals.fetches} fetches | 🔗 ${exploreTotals.sources.size} URLs | ↺ ${exploreTotals.retries} retries`);
       }
 
-      const lines: string[] = [];
-      lines.push(`Mode: ${state.mode}`);
-
-      if (state.mode === "execute") {
+      if (activeProtocol === "execute" || state.criteriaFile || state.currentIncrement || state.commitCount > 0 || state.regressionCount > 0 || state.acStatuses.length > 0) {
         const passed = state.acStatuses.filter((a) => a.status === "pass").length;
         const failed = state.acStatuses.filter((a) => a.status === "fail").length;
         const pending = state.acStatuses.filter((a) => a.status === "pending").length;
@@ -2234,11 +2252,7 @@ export default function (pi: ExtensionAPI) {
         lines.push(`Subagents: 🤖 ${executeTotals.subagentRuns} | PLN ${executeTotals.roleRuns.PLN} | IMP ${executeTotals.roleRuns.IMP} | VER ${executeTotals.roleRuns.VER}`);
         if (state.currentIncrement) lines.push(`Current: ${state.currentIncrement}`);
         if (state.criteriaFile) lines.push(`Criteria: ${state.criteriaFile}`);
-      }
-
-      if (state.mode === "explore") {
-        lines.push(`Debate round: ${state.debateRound ?? 0}/3`);
-        lines.push(`External evidence: 🤖 ${exploreTotals.subagentRuns} subagent rounds | 🔎 ${exploreTotals.searches} searches | 🌐 ${exploreTotals.fetches} fetches | 🔗 ${exploreTotals.sources.size} URLs | ↺ ${exploreTotals.retries} retries`);
+        lines.push(`Commits: ${state.commitCount}`);
       }
 
       ctx.ui.notify(lines.join("\n"), "info");
@@ -2329,15 +2343,19 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("agent_end", async (_event, ctx) => {
-    if (!isExploreRuntime() || !exploreChain.active) return;
-    if (!IS_SUBAGENT_CHILD) {
-      ctx.ui.notify(
-        "Explore run ended while the external-evidence gate was still open. Review the final citations manually before accepting the result.",
-        "warning",
-      );
+    if (isExploreRuntime() && exploreChain.active) {
+      if (!IS_SUBAGENT_CHILD) {
+        ctx.ui.notify(
+          "Explore run ended while the external-evidence gate was still open. Review the final citations manually before accepting the result.",
+          "warning",
+        );
+      }
+      endExploreEvidenceChain();
     }
-    endExploreEvidenceChain();
-    updateUI(ctx);
+
+    if (!IS_SUBAGENT_CHILD) {
+      clearActiveProtocolRun(ctx);
+    }
   });
 
   // ── Tool enforcement ──────────────────────────────────────────────
@@ -2367,11 +2385,11 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    if (state.mode === "explore") {
+    if (activeProtocol === "explore") {
       if (event.toolName === "write" || event.toolName === "edit") {
         return {
           block: true,
-          reason: `🔴 BLOCKED: \"${event.toolName}\" is not allowed in explore mode. Explore mode is read-only — no code modifications. Use /execute to switch to implementation mode.`,
+          reason: `🔴 BLOCKED: \"${event.toolName}\" is not allowed during /explore. /explore is read-only — no code modifications. Use /execute when you are ready to implement.`,
         };
       }
 
@@ -2388,18 +2406,18 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    if (state.mode === "execute") {
+    if (activeProtocol === "execute") {
       if (event.toolName === "write" || event.toolName === "edit") {
         return {
           block: true,
-          reason: `🔴 BLOCKED: Main execute mode is orchestration-only. Delegate implementation to harness_subagents with an IMP-configured subagent.`,
+          reason: "🔴 BLOCKED: The parent /execute run is orchestration-only. Delegate implementation to harness_subagents with an IMP-configured subagent.",
         };
       }
 
       if (isToolCallEventType("bash", event)) {
         return {
           block: true,
-          reason: "🔴 BLOCKED: Main execute mode is orchestration-only. Delegate build/test/check commands to harness_subagents with a VER-configured subagent.",
+          reason: "🔴 BLOCKED: The parent /execute run is orchestration-only. Delegate build/test/check commands to harness_subagents with a VER-configured subagent.",
         };
       }
     }
@@ -2407,13 +2425,17 @@ export default function (pi: ExtensionAPI) {
 
   // ── System prompt injection ───────────────────────────────────────
 
-  pi.on("before_agent_start", async (event) => {
+  pi.on("before_agent_start", async (event, ctx) => {
+    if (!IS_SUBAGENT_CHILD) {
+      beginActiveProtocolRun(pendingProtocolInvocation, ctx);
+    }
+
     let injection = "";
 
     if (IS_SUBAGENT_CHILD) {
       if (CHILD_SUBAGENT_MODE === "explore") {
         injection = `
-[HARNESS SUBAGENT: EXPLORE CHILD MODE ACTIVE]
+[HARNESS SUBAGENT: EXPLORE CHILD PROTOCOL ACTIVE]
 You are inside a child explore subprocess, not the parent /explore orchestrator.
 - Do not call harness_subagents recursively; it is unavailable here.
 - Use read-only local inspection plus harness_web_search and harness_web_fetch to gather evidence.
@@ -2424,10 +2446,10 @@ You are inside a child explore subprocess, not the parent /explore orchestrator.
 Evidence collected in this child so far: ${exploreTotals.searches} searches, ${exploreTotals.fetches} fetches, ${exploreTotals.sources.size} unique URLs.
 `;
       }
-    } else if (state.mode === "explore") {
+    } else if (activeProtocol === "explore") {
       injection = `
-[COGNITIVE HARNESS: EXPLORE MODE ACTIVE]
-You are operating in divergent thinking mode with 4-persona debate.
+[COGNITIVE HARNESS: EXPLORE PROTOCOL RUN ACTIVE]
+You are running the divergent /explore protocol with 4-persona debate.
 - 🔴 OPT (Optimist): Push for the ambitious path
 - 🟡 PRA (Pragmatist): Ground in what ships
 - 🟢 SKP (Skeptic): Find what breaks
@@ -2447,18 +2469,18 @@ External-evidence policy:
 - A synthesis is not acceptable unless it cites explicit source URLs or marks a claim [UNVERIFIED].
 Evidence collected this session so far: ${exploreTotals.subagentRuns} subagent rounds, ${exploreTotals.searches} searches, ${exploreTotals.fetches} fetches, ${exploreTotals.sources.size} unique URLs.
 `;
-    } else if (state.mode === "execute") {
+    } else if (activeProtocol === "execute") {
       const passed = state.acStatuses.filter((a) => a.status === "pass").length;
       const total = state.acStatuses.length;
 
       injection = `
-[COGNITIVE HARNESS: EXECUTE MODE ACTIVE]
-You are operating in convergent execution mode with 3-role mutual verification.
+[COGNITIVE HARNESS: EXECUTE PROTOCOL RUN ACTIVE]
+You are running the convergent /execute protocol with 3-role mutual verification.
 - 📋 PLN (Planner): Decides what/order. Cannot write code or mark ACs.
 - 🔨 IMP (Implementer): Writes code. Cannot mark ACs passed.
 - ✅ VER (Verifier): Sole authority on AC pass/fail. Cannot write code.
 Iron law: No role evaluates its own output.
-This parent execute agent is an ORCHESTRATOR. Direct write/edit/bash implementation is blocked here.
+This parent /execute agent is an ORCHESTRATOR. Direct write/edit/bash implementation is blocked here.
 Use harness_subagents to invoke real isolated PLN / IMP / VER subprocess agents. Use sequential mode for PLN → IMP → VER handoffs.
 AC Status: ${passed}/${total} passed. Regressions: ${state.regressionCount}. Commits: ${state.commitCount}.
 ${state.currentIncrement ? `Current increment: ${state.currentIncrement}` : ""}
@@ -2483,10 +2505,10 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
   pi.registerTool({
     name: "harness_web_search",
     label: "Harness Web Search",
-    description: "Search the public web for external sources. Use this in explore mode to gather ecosystem, prior-art, benchmark, or failure-mode evidence before making claims.",
+    description: "Search the public web for external sources. Use this during /explore or other research-heavy runs to gather ecosystem, prior-art, benchmark, or failure-mode evidence before making claims.",
     promptSnippet: "Search the public web for external evidence and candidate sources.",
     promptGuidelines: [
-      "Use harness_web_search in explore mode before making ecosystem or prior-art claims.",
+      "Use harness_web_search during /explore before making ecosystem or prior-art claims.",
       "Prefer multiple focused queries over one broad query.",
       "After finding promising results, call harness_web_fetch on the strongest URLs before relying on them in the synthesis.",
     ],
@@ -2658,7 +2680,7 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
       const descriptors = definitions.map(({ role, label, icon }) => ({ role, label, icon }));
       const modelSpec = modelToCliSpec(ctx.model as { provider?: string; id?: string } | undefined);
       const thinkingLevel = pi.getThinkingLevel();
-      const genericSubagentChildMode = resolveGenericSubagentChildMode(getRuntimeMode());
+      const genericSubagentChildMode = resolveGenericSubagentChildMode(getRuntimeProtocol());
       let latestSnapshots: HarnessSubagentSnapshot<string>[] = [];
       const batchStartedAt = new Date().toISOString();
 
@@ -2997,7 +3019,7 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
     name: "harness_verify_register",
     label: "Register Verification Method",
     description: "Register or update a verification method for an acceptance criterion. VER calls this after confirming an AC passes, recording HOW it was verified so future regression checks can re-run the same verification.",
-    promptSnippet: "Register a reproducible verification method for an AC (execute mode, VER role only)",
+    promptSnippet: "Register a reproducible verification method for an AC (during an active /execute run, VER role only)",
     promptGuidelines: [
       "Call harness_verify_register after marking an AC as passed to record the verification method.",
       "Include the exact command to re-run the verification and any test files involved.",
@@ -3015,8 +3037,8 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
     }),
     renderShell: "self",
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      if (state.mode !== "execute") {
-        throw new Error("harness_verify_register is only available in execute mode.");
+      if (!isExecuteRuntime()) {
+        throw new Error("harness_verify_register is only available during an active /execute run.");
       }
 
       const registry = await readRegistry(ctx.cwd);
@@ -3069,7 +3091,7 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
     name: "harness_verify_list",
     label: "List Verification Registry",
     description: "List all registered verification methods from the project's Verification Registry. VER calls this before regression checks to get every verification that must be re-run.",
-    promptSnippet: "List all registered verification methods for regression checks (execute mode)",
+    promptSnippet: "List all registered verification methods for regression checks (during an active /execute run)",
     promptGuidelines: [
       "Call harness_verify_list before running regression checks to get all registered verification methods.",
       "Re-run every listed verification command during regression scans.",
@@ -3079,8 +3101,8 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
     }),
     renderShell: "self",
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      if (state.mode !== "execute") {
-        throw new Error("harness_verify_list is only available in execute mode.");
+      if (!isExecuteRuntime()) {
+        throw new Error("harness_verify_list is only available during an active /execute run.");
       }
 
       const registry = await readRegistry(ctx.cwd);
@@ -3150,9 +3172,9 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
     name: "harness_commit",
     label: "Commit & Push Increment",
     description: "Commit verified increment changes and push to remote. Only VER should call this after all gates pass and no regressions are detected.",
-    promptSnippet: "Commit and push verified increment changes (execute mode, VER role only)",
+    promptSnippet: "Commit and push verified increment changes (during an active /execute run, VER role only)",
     promptGuidelines: [
-      "Only call harness_commit in execute mode after VER confirms all gates pass and no regressions.",
+      "Only call harness_commit during an active /execute run after VER confirms all gates pass and no regressions.",
       "Include the increment ID (e.g. INC-1) and a brief description of the changes.",
     ],
     parameters: Type.Object({
@@ -3161,8 +3183,8 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
     }),
     renderShell: "self",
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
-      if (state.mode !== "execute") {
-        throw new Error("harness_commit is only available in execute mode. Use /execute first.");
+      if (!isExecuteRuntime()) {
+        throw new Error("harness_commit is only available during an active /execute run.");
       }
 
       onUpdate?.({
@@ -3245,22 +3267,4 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
     },
   });
 
-  // ── Keyboard shortcut ─────────────────────────────────────────────
-
-  pi.registerShortcut("ctrl+shift+h", {
-    description: "Toggle harness mode: off → explore → execute → off",
-    handler: async (ctx) => {
-      const cycle: Mode[] = ["off", "explore", "execute"];
-      const idx = cycle.indexOf(state.mode);
-      const next = cycle[(idx + 1) % cycle.length];
-      state.mode = next;
-      saveState();
-      if (next === "explore") resetExploreTracking();
-      if (next === "execute") resetExecuteTracking();
-      if (next !== "explore") endExploreEvidenceChain();
-      setModeTools(next);
-      updateUI(ctx);
-      ctx.ui.notify(`Harness: ${next === "off" ? "disabled" : next}`, "info");
-    },
-  });
 }

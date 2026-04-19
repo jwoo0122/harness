@@ -1,12 +1,12 @@
 ---
 name: explore
-description: "Divergent thinking mode with 4-persona debate system (Optimist / Pragmatist / Skeptic / Empiricist). Unlimited imagination grounded by structured conflict. Use when starting a new iteration, evaluating architecture, investigating unknowns, or brainstorming ambitious goals. Produces a debate transcript, synthesis, and concrete planning packet — never commits to implementation. Triggers: 'explore', 'brainstorm', 'what if', 'investigate', 'possibilities', 'research', 'diverge'."
+description: "Divergent thinking protocol with 4-persona debate system (Optimist / Pragmatist / Skeptic / Empiricist). Unlimited imagination grounded by structured conflict. Use when starting a new iteration, evaluating architecture, investigating unknowns, or brainstorming ambitious goals. Produces a debate transcript, synthesis, and concrete planning packet — never commits to implementation. Triggers: 'explore', 'brainstorm', 'what if', 'investigate', 'possibilities', 'research', 'diverge'."
 argument-hint: "[topic or question]"
 ---
 
 # Explore — Divergent Thinking Harness
 
-You are now in **divergent mode** with a **four-persona debate system**.
+You are now running the **divergent explore protocol** with a **four-persona debate system**.
 
 Arguments: $ARGUMENTS — a topic, question, or blank (defaults to "next iteration").
 
@@ -215,7 +215,7 @@ Print the document path when written, plus a per-decision summary and readiness 
 
 - ❌ Writing any production code
 - ❌ Modifying any existing source file
-- ❌ Running cargo build/test/clippy (read-only mode)
+- ❌ Running cargo build/test/clippy (read-only explore protocol)
 - ❌ All four personas agreeing in Round 1 (force friction)
 - ❌ Synthesis that's just the average of four positions
 - ❌ SKP backing down without evidence-based rebuttal

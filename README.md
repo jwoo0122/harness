@@ -1,15 +1,15 @@
 # @jwoo0122/harness
 
-Two-mode cognitive harness for AI coding agents — divergent exploration, convergent execution, and a generic isolated-subagent runtime that powers both.
+Protocol-driven cognitive harness for AI coding agents — divergent exploration, convergent execution, and a generic isolated-subagent runtime that powers both.
 
 ## What this is
 
 `@jwoo0122/harness` is a pi package with two protocol-level skills:
 
-| Mode | Skill | Personas / Roles | Purpose |
-|------|-------|------------------|---------|
-| **Explore** | `/explore` | 🔴 Optimist · 🟡 Pragmatist · 🟢 Skeptic · 🔵 Empiricist | Divergent thinking — expand the space, surface options, force debate |
-| **Execute** | `/execute` | 📋 Planner · 🔨 Implementer · ✅ Verifier | Convergent delivery — ship in increments, verify rigorously |
+| Protocol | Skill / Alias | Personas / Roles | Purpose |
+|----------|---------------|------------------|---------|
+| **Explore** | `/skill:explore` or `/explore` | 🔴 Optimist · 🟡 Pragmatist · 🟢 Skeptic · 🔵 Empiricist | Divergent thinking — expand the space, surface options, force debate |
+| **Execute** | `/skill:execute` or `/execute` | 📋 Planner · 🔨 Implementer · ✅ Verifier | Convergent delivery — ship in increments, verify rigorously |
 
 The important architectural change is this:
 
@@ -47,19 +47,18 @@ pi install /absolute/path/to/harness
 ```
 
 This gives you:
-- `/explore` and `/execute` commands with mode switching
+- one-shot `/explore` and `/execute` aliases that expand to the corresponding skills without switching persistent agent state
 - `harness_subagents` — generic isolated subprocess orchestration
 - compatibility aliases: `harness_explore_subagents`, `harness_execute_subagents` (deprecated for new usage)
-- tool enforcement for explore / execute parent modes
+- run-scoped tool enforcement for active `/explore` and `/execute` turns
 - structured web evidence tools for auditable external research
 - pre-completion explore evidence gating via turn-end steering
 - verification registry tools for cumulative AC verification
-- footer status for current mode and counters
+- footer status for the active protocol run and counters
 - no separate live subagent widget; live subagent progress stays inside the tool call row
 - compact text-first tool rows for built-ins + harness tools (minimal/no output when collapsed, no colored tool box background)
 - state persistence across session restarts
 - prompt templates: `/debate`, `/ac-check`
-- keyboard shortcut: `Ctrl+Shift+H`
 
 ### In Claude Code / other harnesses
 
@@ -79,7 +78,7 @@ The Markdown skills work standalone without the pi extension. You lose enforceme
 
 ## Usage
 
-### Explore mode
+### Explore protocol
 
 ```text
 /explore "Should we use an ECS architecture for the scene graph?"
@@ -93,7 +92,7 @@ Expected runtime shape inside pi:
 5. run the 3-round debate
 6. return or write a planning packet with synthesis, concrete work plan, and clarification questions
 
-### Execute mode
+### Execute protocol
 
 ```text
 /execute .iteration-4-criteria.md
@@ -155,7 +154,7 @@ harness/
 │   ├── bash-policy.ts           # explore/execute bash classification helpers
 │   ├── explore-gate.ts          # pure explore evidence gate assessment helpers
 │   ├── verification-registry.ts # registry storage model + file I/O
-│   ├── index.ts                 # extension composition root, mode management, gating, tools, registry, status UI
+│   ├── index.ts                 # extension composition root, protocol routing, gating, tools, registry, status UI
 │   └── subagents.ts             # generic isolated subprocess runtime
 ├── prompts/
 │   ├── debate.md
@@ -194,13 +193,13 @@ New integrations should prefer `harness_subagents`.
 
 ### 4. TUI behavior is now simpler
 
-- footer status shows mode-level state
+- footer status appears only for the active protocol run
 - there is no separate subagent widget; live progress is rendered inside the subagent tool call itself
-- there is no always-on mode dashboard widget anymore
+- there is no always-on harness dashboard widget anymore
 
 ### 5. Verification registry stays cumulative
 
-Execute mode persists reproducible AC verification methods in:
+The execute protocol persists reproducible AC verification methods in:
 
 ```text
 .harness/verification-registry.json
