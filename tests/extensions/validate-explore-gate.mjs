@@ -39,10 +39,9 @@ assert.equal(
   1,
   "extensions/index.ts should only touch the harness widget to clear it",
 );
-assert.equal(
-  (indexSource.match(/deliverAs: "followUp"/g) ?? []).length,
-  0,
-  "extensions/index.ts should no longer dispatch skill followUps for /explore or /execute",
+assert.ok(
+  !indexSource.includes('pi.sendUserMessage("/skill:explore') && !indexSource.includes('pi.sendUserMessage("/skill:execute'),
+  "extensions/index.ts should no longer dispatch /skill:explore or /skill:execute followUps",
 );
 assert.ok(indexSource.includes("CHILD_SUBAGENT_MODE"), "extensions/index.ts must consume HARNESS_SUBAGENT_MODE");
 assert.ok(

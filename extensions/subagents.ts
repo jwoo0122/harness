@@ -55,6 +55,7 @@ export interface HarnessSubagentSpec<TRole extends string = string> {
   activeTools: string[];
   bashPolicy: SubagentBashPolicy;
   extensionPath: string;
+  env?: Record<string, string | undefined>;
   modelSpec?: string;
   thinkingLevel?: string;
   signal?: AbortSignal;
@@ -323,6 +324,7 @@ export async function runHarnessSubagentProcess<TRole extends string>(
         HARNESS_SUBAGENT_ROLE: String(spec.role),
         HARNESS_SUBAGENT_TOOLS: spec.activeTools.join(","),
         HARNESS_SUBAGENT_BASH_POLICY: spec.bashPolicy,
+        ...spec.env,
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
