@@ -711,6 +711,48 @@ function renderToolTextBlock(
   return new Text(content, 0, 0);
 }
 
+interface StableTextLine {
+  id: string;
+  text: string;
+}
+
+class StableTextLineList extends Container {
+  private readonly lineComponents = new Map<string, Text>();
+
+  setLines(lines: StableTextLine[]): void {
+    const nextIds = new Set(lines.map((line) => line.id));
+    for (const id of [...this.lineComponents.keys()]) {
+      if (!nextIds.has(id)) this.lineComponents.delete(id);
+    }
+
+    this.clear();
+    for (const line of lines) {
+      let component = this.lineComponents.get(line.id);
+      if (!component) {
+        component = new Text("", 0, 0);
+        this.lineComponents.set(line.id, component);
+      }
+      component.setText(line.text || " ");
+      this.addChild(component);
+    }
+  }
+}
+
+function renderStableTextLineList(
+  text: string,
+  context: { lastComponent?: unknown },
+): StableTextLineList {
+  const component = context.lastComponent instanceof StableTextLineList
+    ? context.lastComponent
+    : new StableTextLineList();
+  component.setLines(
+    text
+      .split("\n")
+      .map((line, index) => ({ id: `line:${index}`, text: line })),
+  );
+  return component;
+}
+
 function compactToolStatusPrefix(
   theme: { fg: (token: string, text: string) => string },
   context: { isPartial?: boolean; executionStarted?: boolean; isError?: boolean },
@@ -2733,13 +2775,11 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
         return renderCompactToolResult(result, { expanded }, theme, context, fallback);
       }
 
-      return new Text(
-        expanded
-          ? renderHarnessSubagentsExpandedText(details, isPartial, theme)
-          : renderHarnessSubagentsCollapsedText(details, theme),
-        0,
-        0,
-      );
+      if (expanded) {
+        return new Text(renderHarnessSubagentsExpandedText(details, isPartial, theme), 0, 0);
+      }
+
+      return renderStableTextLineList(renderHarnessSubagentsCollapsedText(details, theme), context);
     },
   });
 
@@ -2833,13 +2873,11 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
         return renderCompactToolResult(result, { expanded }, theme, context, fallback);
       }
 
-      return new Text(
-        expanded
-          ? renderExploreSubagentExpandedText(details, isPartial, theme)
-          : renderExploreSubagentCollapsedText(details, theme),
-        0,
-        0,
-      );
+      if (expanded) {
+        return new Text(renderExploreSubagentExpandedText(details, isPartial, theme), 0, 0);
+      }
+
+      return renderStableTextLineList(renderExploreSubagentCollapsedText(details, theme), context);
     },
   });
 
@@ -2967,13 +3005,11 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
         return renderCompactToolResult(result, { expanded }, theme, context, fallback);
       }
 
-      return new Text(
-        expanded
-          ? renderExecuteSubagentExpandedText(details, isPartial, theme)
-          : renderExecuteSubagentCollapsedText(details, theme),
-        0,
-        0,
-      );
+      if (expanded) {
+        return new Text(renderExecuteSubagentExpandedText(details, isPartial, theme), 0, 0);
+      }
+
+      return renderStableTextLineList(renderExecuteSubagentCollapsedText(details, theme), context);
     },
   });
 
