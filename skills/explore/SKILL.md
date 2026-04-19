@@ -1,6 +1,6 @@
 ---
 name: explore
-description: "Divergent thinking mode with 4-persona debate system (Optimist / Pragmatist / Skeptic / Empiricist). Unlimited imagination grounded by structured conflict. Use when starting a new iteration, evaluating architecture, investigating unknowns, or brainstorming ambitious goals. Produces a debate transcript and synthesis — never commits to implementation. Triggers: 'explore', 'brainstorm', 'what if', 'investigate', 'possibilities', 'research', 'diverge'."
+description: "Divergent thinking mode with 4-persona debate system (Optimist / Pragmatist / Skeptic / Empiricist). Unlimited imagination grounded by structured conflict. Use when starting a new iteration, evaluating architecture, investigating unknowns, or brainstorming ambitious goals. Produces a debate transcript, synthesis, and concrete planning packet — never commits to implementation. Triggers: 'explore', 'brainstorm', 'what if', 'investigate', 'possibilities', 'research', 'diverge'."
 argument-hint: "[topic or question]"
 ---
 
@@ -74,6 +74,20 @@ The synthesis is NOT the average of four opinions. It's the **strongest position
 
 ## Procedure
 
+### Phase 0 — Clarification gate
+
+Before research or debate, check whether the request clearly defines:
+- the decision to make
+- the relevant scope / alternatives
+- hard constraints / non-goals
+- success criteria
+
+If missing information or contradictory requirements could materially change the recommendation:
+1. Ask up to **3 targeted clarification questions**.
+2. For each question, explain **why it matters** and **what answer shapes would change**.
+3. Stop after the questions; do **not** start the debate in the same reply.
+4. If the user explicitly wants a best-effort answer now, continue with an `Assumptions` section and mark each inferred assumption as `[ASSUMPTION]`.
+
 ### Phase 1 — Context snapshot
 
 Gather current state. All four personas share this factual base.
@@ -135,9 +149,27 @@ Not a vote. Not an average. The **strongest surviving argument**:
 🟢 SKP annotates with risk flags and failure scenarios.
 🔵 EMP annotates with proof thresholds, discriminating experiments, and the evidence needed before scaling the bet.
 
-### Phase 5 — Output document
+### Phase 5 — Concrete work plan (planning-only)
 
-Write to: `target/explore/<topic-slug>-<YYYYMMDD-HHMMSS>.md`
+Turn the surviving synthesis into a plan that is specific enough to decide **what should happen next**, but not so specific that it becomes implementation work.
+
+Allowed here:
+- phases / milestones
+- dependencies / prerequisites
+- risks / failure modes
+- decision gates / proof needed before execution
+- what the user must decide before `/execute`
+
+Forbidden here:
+- patches or code
+- file-by-file edit instructions
+- command-by-command implementation scripts
+- pretending execution is already approved
+
+### Phase 6 — Output document
+
+If the environment allows documentation writes, write to: `target/explore/<topic-slug>-<YYYYMMDD-HHMMSS>.md`
+Otherwise, return the same markdown inline.
 
 ```markdown
 # Exploration: [topic]
@@ -149,11 +181,23 @@ Write to: `target/explore/<topic-slug>-<YYYYMMDD-HHMMSS>.md`
 ## Ambitious vision (annotated)
 [Phase 4]
 
-## Suggested next steps
-[What the user should decide before /execute]
+## Concrete work plan (planning-only)
+| Phase | Goal | Dependencies | Risks | Exit criteria |
+|-------|------|--------------|-------|---------------|
+
+## Clarification questions
+| QID | Question | Why it matters | What changes depending on the answer? | Priority |
+|-----|----------|----------------|---------------------------------------|----------|
+
+## Assumptions
+- [ASSUMPTION] ...
+
+## Ready for /execute
+- Yes / No
+- Blockers: [questions or decisions still unresolved]
 ```
 
-Print the document path and a per-decision summary to the user.
+Print the document path when written, plus a per-decision summary and readiness status.
 
 ---
 
@@ -180,10 +224,13 @@ Print the document path and a per-decision summary to the user.
 - ❌ PRA ignoring ambitious options (that's not pragmatism, it's timidity)
 - ❌ Citing training-data claims without `[UNVERIFIED]`
 - ❌ Skipping the cross-examination round
+- ❌ Turning explore output into patches, file-by-file edits, or command-by-command implementation instructions
+- ❌ Silently filling in missing constraints when those constraints could change the recommendation
 
 ## When to transition to /execute
 
-1. User has reviewed the debate transcript
+1. User has reviewed the debate transcript and planning packet
 2. User signs off on synthesis positions (or overrides them)
-3. Requirements criteria written as `.iteration-N-criteria.md`
-4. → `/execute` with the criteria file
+3. Concrete work plan blockers / clarification questions are resolved or explicitly accepted as assumptions
+4. Requirements criteria written as `.iteration-N-criteria.md`
+5. → `/execute` with the criteria file
