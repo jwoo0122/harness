@@ -2084,28 +2084,6 @@ export default function (pi: ExtensionAPI) {
     if (IS_SUBAGENT_CHILD || !ctx.hasUI) return;
 
     ctx.ui.setWidget("harness", undefined);
-
-    if (activeProtocol === "explore") {
-      ctx.ui.setStatus(
-        "harness",
-        `🧠 EXPLORE 🤖${exploreTotals.subagentRuns} 🔎${exploreTotals.searches} 🌐${exploreTotals.fetches} 🔗${exploreTotals.sources.size}`,
-      );
-      return;
-    }
-
-    if (activeProtocol === "execute") {
-      const passed = state.acStatuses.filter((a) => a.status === "pass").length;
-      const failed = state.acStatuses.filter((a) => a.status === "fail").length;
-      const pending = state.acStatuses.filter((a) => a.status === "pending").length;
-
-      ctx.ui.setStatus(
-        "harness",
-        `⚙️ EXECUTE 🤖${executeTotals.subagentRuns} ✅${passed} ❌${failed} ⏳${pending} 📦${state.commitCount}`,
-      );
-      return;
-    }
-
-    ctx.ui.setStatus("harness", undefined);
   }
 
   function endExploreEvidenceChain() {
@@ -2228,35 +2206,6 @@ export default function (pi: ExtensionAPI) {
       action: "transform",
       text: invocation.rewrittenText,
     };
-  });
-
-  pi.registerCommand("harness-status", {
-    description: "Show the active harness run and stored execute state",
-    handler: async (_args, ctx) => {
-      const lines: string[] = [];
-      lines.push(activeProtocol
-        ? `Active protocol: ${activeProtocol}`
-        : "No active /explore or /execute run.");
-
-      if (activeProtocol === "explore") {
-        lines.push(`Debate round: ${state.debateRound ?? 0}/3`);
-        lines.push(`External evidence: 🤖 ${exploreTotals.subagentRuns} subagent rounds | 🔎 ${exploreTotals.searches} searches | 🌐 ${exploreTotals.fetches} fetches | 🔗 ${exploreTotals.sources.size} URLs | ↺ ${exploreTotals.retries} retries`);
-      }
-
-      if (activeProtocol === "execute" || state.criteriaFile || state.currentIncrement || state.commitCount > 0 || state.regressionCount > 0 || state.acStatuses.length > 0) {
-        const passed = state.acStatuses.filter((a) => a.status === "pass").length;
-        const failed = state.acStatuses.filter((a) => a.status === "fail").length;
-        const pending = state.acStatuses.filter((a) => a.status === "pending").length;
-        lines.push(`ACs: ✅ ${passed} | ❌ ${failed} | ⏳ ${pending}`);
-        lines.push(`Regressions: ${state.regressionCount}`);
-        lines.push(`Subagents: 🤖 ${executeTotals.subagentRuns} | PLN ${executeTotals.roleRuns.PLN} | IMP ${executeTotals.roleRuns.IMP} | VER ${executeTotals.roleRuns.VER}`);
-        if (state.currentIncrement) lines.push(`Current: ${state.currentIncrement}`);
-        if (state.criteriaFile) lines.push(`Criteria: ${state.criteriaFile}`);
-        lines.push(`Commits: ${state.commitCount}`);
-      }
-
-      ctx.ui.notify(lines.join("\n"), "info");
-    },
   });
 
   // ── External evidence tracking ─────────────────────────────────────
