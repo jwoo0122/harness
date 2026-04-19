@@ -86,10 +86,11 @@ The Markdown skills work standalone without the pi extension. You lose enforceme
 
 Expected runtime shape inside pi:
 1. gather read-only local context
-2. call `harness_subagents` with **OPT / PRA / SKP / EMP** in **parallel**
-3. research external evidence with `harness_web_search` / `harness_web_fetch`
-4. run the 3-round debate
-5. write the synthesis document to `target/explore/`
+2. ask targeted clarification questions first if ambiguity or contradiction would materially change the recommendation
+3. call `harness_subagents` with **OPT / PRA / SKP / EMP** in **parallel**
+4. research external evidence with `harness_web_search` / `harness_web_fetch`
+5. run the 3-round debate
+6. return or write a planning packet with synthesis, concrete work plan, and clarification questions
 
 ### Execute mode
 
