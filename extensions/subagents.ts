@@ -7,6 +7,10 @@ export type SubagentBashPolicy = "none" | "read-only" | "verify" | "implement";
 export type SubagentBatchMode = "parallel" | "sequential";
 export type HarnessSubagentLivePhase = "starting" | "running" | "tool_running" | "completed" | "failed";
 
+export function resolveGenericSubagentChildMode(parentMode: HarnessMode | "off"): HarnessMode {
+  return parentMode === "explore" ? "explore" : "generic";
+}
+
 const BUILTIN_TOOL_NAMES = new Set(["read", "bash", "edit", "write", "grep", "find", "ls"]);
 const MAX_RECENT_STREAM_ITEMS = 24;
 const MAX_ASSISTANT_PREVIEW_CHARS = 400;

@@ -52,9 +52,10 @@ This gives you:
 - compatibility aliases: `harness_explore_subagents`, `harness_execute_subagents` (deprecated for new usage)
 - tool enforcement for explore / execute parent modes
 - structured web evidence tools for auditable external research
+- pre-completion explore evidence gating via turn-end steering
 - verification registry tools for cumulative AC verification
 - footer status for current mode and counters
-- **live subagent widget only while a subagent batch is running**
+- no separate live subagent widget; live subagent progress stays inside the tool call row
 - compact text-first tool rows for built-ins + harness tools (minimal/no output when collapsed, no colored tool box background)
 - state persistence across session restarts
 - prompt templates: `/debate`, `/ac-check`
@@ -151,6 +152,7 @@ harness/
 ├── extensions/
 │   ├── agent-prompts.ts         # prompt loading + explore/execute prompt builders
 │   ├── bash-policy.ts           # explore/execute bash classification helpers
+│   ├── explore-gate.ts          # pure explore evidence gate assessment helpers
 │   ├── verification-registry.ts # registry storage model + file I/O
 │   ├── index.ts                 # extension composition root, mode management, gating, tools, registry, status UI
 │   └── subagents.ts             # generic isolated subprocess runtime
@@ -192,7 +194,7 @@ New integrations should prefer `harness_subagents`.
 ### 4. TUI behavior is now simpler
 
 - footer status shows mode-level state
-- widget UI appears **only during an active subagent batch**
+- there is no separate subagent widget; live progress is rendered inside the subagent tool call itself
 - there is no always-on mode dashboard widget anymore
 
 ### 5. Verification registry stays cumulative

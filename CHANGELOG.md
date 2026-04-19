@@ -11,6 +11,7 @@
 - prompt loading and explore/execute prompt builders have been extracted from `extensions/index.ts` into `extensions/agent-prompts.ts`
 - bash-policy classification helpers have been extracted from `extensions/index.ts` into `extensions/bash-policy.ts`
 - verification registry storage types and file I/O have been extracted from `extensions/index.ts` into `extensions/verification-registry.ts`
+- live subagent progress no longer renders in a separate widget; it now stays inside the subagent tool call with one line per subagent
 - `/explore`, docs, and prompt templates now reference the four-persona debate shape
 
 ## 0.2.0 - 2026-04-18

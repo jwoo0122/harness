@@ -15,7 +15,7 @@
         "description": "Regression re-check of verification-registry plumbing after extension refactors: confirm the verify-register and verify-list tool definitions still exist in extensions/index.ts and remain documented in README.md and INTEGRATION.md. Full live execute-mode tool invocation remains a manual harness check."
       },
       "registeredAt": "INC-1",
-      "lastVerifiedAt": "INC-7",
+      "lastVerifiedAt": "INC-1",
       "lastResult": "pass"
     },
     "AC-5.3": {
@@ -71,6 +71,95 @@
       },
       "registeredAt": "INC-7",
       "lastVerifiedAt": "INC-7",
+      "lastResult": "pass"
+    },
+    "AC-8.1": {
+      "requirement": "No separate subagent widget/banner surface remains.",
+      "source": ".iteration-8-criteria.md",
+      "verification": {
+        "strategy": "automated-test",
+        "command": "npm run validate:extensions",
+        "files": [
+          "extensions/index.ts",
+          "tests/extensions/validate-explore-gate.mjs",
+          "package.json"
+        ],
+        "description": "Validation chain confirms updateUI only clears the harness widget, live-widget-only helpers are absent, and no separate live subagent banner surface remains."
+      },
+      "registeredAt": "INC-8",
+      "lastVerifiedAt": "INC-8",
+      "lastResult": "pass"
+    },
+    "AC-8.2": {
+      "requirement": "Collapsed subagent tool rows remain per-subagent and activity-rich.",
+      "source": ".iteration-8-criteria.md",
+      "verification": {
+        "strategy": "automated-test",
+        "command": "npm run validate:extensions",
+        "files": [
+          "extensions/index.ts",
+          "tests/extensions/validate-explore-gate.mjs"
+        ],
+        "description": "Validation chain confirms explore, execute, and generic collapsed renderers still emit one row per subagent beneath the batch summary and preserve activity-rich rendering."
+      },
+      "registeredAt": "INC-8",
+      "lastVerifiedAt": "INC-8",
+      "lastResult": "pass"
+    },
+    "AC-8.3": {
+      "requirement": "Parent explore evidence gate is enforced pre-completion.",
+      "source": ".iteration-8-criteria.md",
+      "verification": {
+        "strategy": "automated-test",
+        "command": "npm run validate:extensions",
+        "files": [
+          "extensions/index.ts",
+          "extensions/explore-gate.ts",
+          "tests/extensions/validate-explore-gate.mjs",
+          "package.json"
+        ],
+        "description": "Validation chain confirms turn_end plus steer wiring, parent evidence thresholds, and removal of the old followUp-based agent_end retry as the primary explore gate."
+      },
+      "registeredAt": "INC-8",
+      "lastVerifiedAt": "INC-8",
+      "lastResult": "pass"
+    },
+    "AC-8.4": {
+      "requirement": "Child explore subagents get child-safe gating and prompt handling, including the generic harness_subagents explore path.",
+      "source": ".iteration-8-criteria.md",
+      "verification": {
+        "strategy": "automated-test",
+        "command": "npm run validate:extensions",
+        "files": [
+          "extensions/index.ts",
+          "extensions/explore-gate.ts",
+          "extensions/subagents.ts",
+          "tests/extensions/validate-explore-gate.mjs",
+          "tests/extensions/validate-subagent-mode.mjs",
+          "package.json"
+        ],
+        "description": "Validation chain confirms child explore mode consumption, child-safe prompt injection, no recursive harness_subagents guidance, ready-to-conclude steering, and explore-mode propagation through generic harness_subagents."
+      },
+      "registeredAt": "INC-8",
+      "lastVerifiedAt": "INC-8",
+      "lastResult": "pass"
+    },
+    "AC-8.5": {
+      "requirement": "Validation deterministically covers the new explore gate and generic child-mode propagation.",
+      "source": ".iteration-8-criteria.md",
+      "verification": {
+        "strategy": "automated-test",
+        "command": "npm run validate:extensions",
+        "files": [
+          "package.json",
+          "extensions/explore-gate.ts",
+          "tests/extensions/validate-explore-gate.mjs",
+          "tests/extensions/validate-subagent-mode.mjs"
+        ],
+        "description": "Validation chain syntax-checks the new explore-gate module and executes deterministic source/behavior checks for parent and child gating plus generic explore child-mode propagation."
+      },
+      "registeredAt": "INC-8",
+      "lastVerifiedAt": "INC-8",
       "lastResult": "pass"
     }
   }

@@ -11,6 +11,7 @@ import {
 } from "./agent-prompts.js";
 import { classifyChildBashCommand, classifyExploreBash, isAgentBrowserCommand } from "./bash-policy.js";
 import { registerCompactBuiltinToolRenderers } from "./compact-tool-renderers.js";
+import { evaluateExploreEvidenceGate } from "./explore-gate.js";
 import { readRegistry, writeRegistry } from "./verification-registry.js";
 import {
   type HarnessSubagentRunResult,
@@ -18,6 +19,7 @@ import {
   type HarnessSubagentSpec,
   type SubagentBashPolicy,
   formatPriorSubagentOutputs,
+  resolveGenericSubagentChildMode,
   runHarnessSubagentBatch,
 } from "./subagents.js";
 
@@ -61,6 +63,7 @@ interface ExploreEvidenceChain {
   browserResearchCalls: number;
   sources: Set<string>;
   retries: number;
+  readyToConcludeSent: boolean;
 }
 
 interface ExploreSubagentResult extends HarnessSubagentRunResult<ExplorePersona> {
@@ -197,31 +200,6 @@ interface ExecuteSubagentTotals {
   roleRuns: Record<ExecuteRole, number>;
 }
 
-interface ExploreLiveBatchState {
-  topic: string;
-  completed: number;
-  total: number;
-  personas: ExplorePersona[];
-  snapshots: HarnessSubagentSnapshot<ExplorePersona>[];
-}
-
-interface ExecuteLiveBatchState {
-  objective: string;
-  completed: number;
-  total: number;
-  roles: ExecuteRole[];
-  snapshots: HarnessSubagentSnapshot<ExecuteRole>[];
-}
-
-interface HarnessLiveBatchState {
-  subject: string;
-  mode: "parallel" | "sequential";
-  completed: number;
-  total: number;
-  subagents: Array<Pick<HarnessSubagentDefinition, "role" | "label" | "icon">>;
-  snapshots: HarnessSubagentSnapshot<string>[];
-}
-
 interface WebSearchResult {
   title: string;
   url: string;
@@ -233,6 +211,7 @@ interface WebSearchResult {
 
 const CURRENT_EXTENSION_PATH = fileURLToPath(import.meta.url);
 const IS_SUBAGENT_CHILD = process.env.HARNESS_SUBAGENT_CHILD === "1";
+const CHILD_SUBAGENT_MODE = process.env.HARNESS_SUBAGENT_MODE ?? "generic";
 const CHILD_SUBAGENT_ROLE = process.env.HARNESS_SUBAGENT_ROLE ?? "";
 const CHILD_SUBAGENT_TOOLS = (process.env.HARNESS_SUBAGENT_TOOLS ?? "")
   .split(",")
@@ -658,59 +637,6 @@ function formatLiveToolName(toolName: string): string {
   }
 }
 
-function describeLiveSubagent<TRole extends string>(snapshot: HarnessSubagentSnapshot<TRole> | undefined): string {
-  if (!snapshot) return "queued";
-  if (snapshot.livePhase === "tool_running") {
-    return snapshot.currentToolName ? formatLiveToolName(snapshot.currentToolName) : "working";
-  }
-  if (snapshot.livePhase === "running") return "thinking";
-  if (snapshot.livePhase === "starting") return "starting";
-  if (snapshot.livePhase === "completed") return "done";
-  return "failed";
-}
-
-function formatLiveExploreBatchStatus(batch: ExploreLiveBatchState): string {
-  const snapshotsByPersona = new Map<ExplorePersona, HarnessSubagentSnapshot<ExplorePersona>>();
-  for (const snapshot of batch.snapshots) {
-    snapshotsByPersona.set(snapshot.role, snapshot);
-  }
-
-  const segments = batch.personas.map((persona) => {
-    const spec = resolveExplorePersona(persona);
-    return `${spec.icon}${persona} ${describeLiveSubagent(snapshotsByPersona.get(persona))}`;
-  });
-
-  return `🤖 ${batch.completed}/${batch.total} · ${segments.join(" · ")}`;
-}
-
-function formatLiveExecuteBatchStatus(batch: ExecuteLiveBatchState): string {
-  const snapshotsByRole = new Map<ExecuteRole, HarnessSubagentSnapshot<ExecuteRole>>();
-  for (const snapshot of batch.snapshots) {
-    snapshotsByRole.set(snapshot.role, snapshot);
-  }
-
-  const segments = batch.roles.map((role) => {
-    const spec = resolveExecuteRole(role);
-    return `${spec.icon}${role} ${describeLiveSubagent(snapshotsByRole.get(role))}`;
-  });
-
-  return `🤖 ${batch.completed}/${batch.total} · ${segments.join(" · ")}`;
-}
-
-function formatLiveHarnessBatchStatus(batch: HarnessLiveBatchState): string {
-  const snapshotsByRole = new Map<string, HarnessSubagentSnapshot<string>>();
-  for (const snapshot of batch.snapshots) {
-    snapshotsByRole.set(snapshot.role, snapshot);
-  }
-
-  const segments = batch.subagents.map((subagent) => {
-    const prefix = subagent.icon ? `${subagent.icon} ` : "";
-    return `${prefix}${subagent.role} ${describeLiveSubagent(snapshotsByRole.get(subagent.role))}`;
-  });
-
-  return `🤖 ${batch.completed}/${batch.total} · ${segments.join(" · ")}`;
-}
-
 function summarizeExecuteSubagentProgress(details: ExecuteSubagentToolDetails): string {
   const completedLabels = details.results.map((result) => result.role).join(", ") || "none";
   return `Running execute subagents for \"${details.objective}\" — ${details.completed}/${details.total} complete (${completedLabels})`;
@@ -909,6 +835,108 @@ function describeSubagentLiveActivity(snapshot: HarnessSubagentSnapshot | undefi
   return "idle";
 }
 
+function lastSubagentToolStart(
+  snapshot: HarnessSubagentSnapshot | HarnessSubagentRunResult | undefined,
+): HarnessSubagentSnapshot["recentStream"][number] | undefined {
+  if (!snapshot) return undefined;
+  return findLastSubagentStreamItem(
+    snapshot.recentStream,
+    (item) => item.type === "tool_execution_start" && Boolean(item.toolName),
+  );
+}
+
+function lastSubagentToolEnd(
+  snapshot: HarnessSubagentSnapshot | HarnessSubagentRunResult | undefined,
+): HarnessSubagentSnapshot["recentStream"][number] | undefined {
+  if (!snapshot) return undefined;
+  return findLastSubagentStreamItem(
+    snapshot.recentStream,
+    (item) => item.type === "tool_execution_end" && Boolean(item.toolName),
+  );
+}
+
+function describeSubagentLastToolCall(
+  snapshot: HarnessSubagentSnapshot | HarnessSubagentRunResult | undefined,
+): string {
+  const lastToolStart = lastSubagentToolStart(snapshot);
+  if (lastToolStart?.toolName) {
+    return formatSubagentToolActivity(lastToolStart.toolName, lastToolStart.text);
+  }
+
+  const lastToolEnd = lastSubagentToolEnd(snapshot);
+  if (lastToolEnd?.toolName) {
+    return formatLiveToolName(lastToolEnd.toolName);
+  }
+
+  return "";
+}
+
+function describeCollapsedSubagentActivity(
+  snapshot: HarnessSubagentSnapshot | undefined,
+  result: HarnessSubagentRunResult | undefined,
+): { text: string; tone: string } {
+  if (snapshot?.livePhase === "tool_running") {
+    return {
+      text: describeSubagentLiveActivity(snapshot),
+      tone: "accent",
+    };
+  }
+
+  if (result?.exitCode !== 0) {
+    const stderrPreview = summarizeSubagentText(result.stderr, MAX_SUBAGENT_ACTIVITY_CHARS);
+    if (stderrPreview) {
+      return {
+        text: `stderr ${stderrPreview}`,
+        tone: "error",
+      };
+    }
+  }
+
+  const lastToolCall = describeSubagentLastToolCall(snapshot ?? result);
+  if (lastToolCall) {
+    return {
+      text: `last ${lastToolCall}`,
+      tone: "accent",
+    };
+  }
+
+  const assistantPreview = summarizeSubagentText(result?.output ?? snapshot?.assistantPreview, MAX_SUBAGENT_ACTIVITY_CHARS);
+  if (assistantPreview) {
+    return {
+      text: assistantPreview,
+      tone: "toolOutput",
+    };
+  }
+
+  return {
+    text: describeSubagentLiveActivity(snapshot),
+    tone: "muted",
+  };
+}
+
+function renderCollapsedSubagentLine(
+  label: string,
+  snapshot: HarnessSubagentSnapshot | undefined,
+  result: HarnessSubagentRunResult | undefined,
+  theme: { fg: (token: string, text: string) => string; bold: (text: string) => string },
+): string {
+  const phase = getSubagentPhase(snapshot, result);
+  const phaseTone = getSubagentPhaseTone(snapshot, result);
+  const activity = describeCollapsedSubagentActivity(snapshot, result);
+  const parts = [
+    `  ${theme.fg("toolTitle", theme.bold(label))}`,
+    theme.fg("muted", "·"),
+    theme.fg(phaseTone, phase),
+  ];
+
+  if (activity.text) {
+    parts.push(theme.fg("muted", "·"));
+    parts.push(theme.fg(activity.tone, activity.text));
+  }
+
+  return parts.join(" ");
+}
+
 function formatSubagentToolCounts(toolCalls: Record<string, number>, maxItems = Number.MAX_SAFE_INTEGER): string {
   const entries = Object.entries(toolCalls)
     .filter(([, count]) => count > 0)
@@ -1089,12 +1117,20 @@ function renderExploreSubagentCollapsedText(
       : theme.fg("success", `${details.completed}/${details.total} done`)
     : theme.fg("warning", `${details.completed}/${details.total} running`);
 
-  return [
+  const lines = [[
     status,
     totalSearches > 0 ? theme.fg("muted", `🔎 ${totalSearches}`) : undefined,
     totalFetches > 0 ? theme.fg("muted", `🌐 ${totalFetches}`) : undefined,
     totalUrls > 0 ? theme.fg("muted", `🔗 ${totalUrls}`) : undefined,
-  ].filter(Boolean).join(` ${theme.fg("muted", "·")} `);
+  ].filter(Boolean).join(` ${theme.fg("muted", "·")} `)];
+
+  for (const role of EXPLORE_SUBAGENT_ROLES) {
+    const result = details.results.find((entry) => entry.persona === role.persona);
+    const snapshot = details.snapshots.find((entry) => entry.role === role.persona);
+    lines.push(renderCollapsedSubagentLine(`${role.icon} ${role.persona}`, snapshot, result, theme));
+  }
+
+  return lines.join("\n");
 }
 
 function renderExecuteSubagentCollapsedText(
@@ -1117,11 +1153,19 @@ function renderExecuteSubagentCollapsedText(
     3,
   );
 
-  return [
+  const lines = [[
     status,
-    theme.fg("muted", details.roles.join("/")),
     toolSummary ? theme.fg("muted", toolSummary) : undefined,
-  ].filter(Boolean).join(` ${theme.fg("muted", "·")} `);
+  ].filter(Boolean).join(` ${theme.fg("muted", "·")} `)];
+
+  for (const role of details.roles) {
+    const snapshot = details.snapshots.find((entry) => entry.role === role);
+    const result = details.results.find((entry) => entry.role === role);
+    const spec = resolveExecuteRole(role);
+    lines.push(renderCollapsedSubagentLine(`${spec.icon} ${role}`, snapshot, result, theme));
+  }
+
+  return lines.join("\n");
 }
 
 function renderExploreSubagentExpandedText(
@@ -1221,6 +1265,9 @@ function renderHarnessSubagentsCollapsedText(
   theme: { fg: (token: string, text: string) => string; bold: (text: string) => string },
 ): string {
   const failures = details.results.filter((result) => result.exitCode !== 0).length;
+  const totalSearches = details.results.reduce((sum, result) => sum + result.searches, 0);
+  const totalFetches = details.results.reduce((sum, result) => sum + result.fetches, 0);
+  const totalUrls = uniqueUrls(details.results.flatMap((result) => result.citations)).length;
   const status = details.completed >= details.total
     ? failures > 0
       ? theme.fg("error", `${details.completed}/${details.total} done · ${failures} failed`)
@@ -1236,11 +1283,22 @@ function renderHarnessSubagentsCollapsedText(
     3,
   );
 
-  return [
+  const lines = [[
     status,
-    theme.fg("muted", details.subagents.map((subagent) => subagent.role).join(", ")),
+    totalSearches > 0 ? theme.fg("muted", `🔎 ${totalSearches}`) : undefined,
+    totalFetches > 0 ? theme.fg("muted", `🌐 ${totalFetches}`) : undefined,
+    totalUrls > 0 ? theme.fg("muted", `🔗 ${totalUrls}`) : undefined,
     toolSummary ? theme.fg("muted", toolSummary) : undefined,
-  ].filter(Boolean).join(` ${theme.fg("muted", "·")} `);
+  ].filter(Boolean).join(` ${theme.fg("muted", "·")} `)];
+
+  for (const subagent of details.subagents) {
+    const result = details.results.find((entry) => entry.role === subagent.role);
+    const snapshot = details.snapshots.find((entry) => entry.role === subagent.role);
+    const label = subagent.icon ? `${subagent.icon} ${subagent.role}` : subagent.role;
+    lines.push(renderCollapsedSubagentLine(label, snapshot, result, theme));
+  }
+
+  return lines.join("\n");
 }
 
 function renderHarnessSubagentsExpandedText(
@@ -1715,18 +1773,6 @@ function extractAssistantText(message: any): string {
   return "";
 }
 
-function lastAssistantMessageText(messages: any[]): string {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const message = messages[i];
-    if (message?.role === "assistant") return extractAssistantText(message);
-  }
-  return "";
-}
-
-function hasExternalCitation(text: string): boolean {
-  return /https?:\/\//i.test(text);
-}
-
 function extractUrlsFromText(text: string): string[] {
   const matches = text.match(/https?:\/\/[^\s)\]>"']+/g) ?? [];
   return uniqueUrls(matches);
@@ -1753,6 +1799,7 @@ function createExploreEvidenceChain(): ExploreEvidenceChain {
     browserResearchCalls: 0,
     sources: new Set<string>(),
     retries: 0,
+    readyToConcludeSent: false,
   };
 }
 
@@ -1783,9 +1830,27 @@ export default function (pi: ExtensionAPI) {
   let exploreTotals = createExploreEvidenceTotals();
   let exploreChain = createExploreEvidenceChain();
   let executeTotals = createExecuteSubagentTotals();
-  let liveExploreBatch: ExploreLiveBatchState | undefined;
-  let liveExecuteBatch: ExecuteLiveBatchState | undefined;
-  let liveHarnessBatch: HarnessLiveBatchState | undefined;
+
+  function getRuntimeMode(): Mode | "generic" {
+    if (IS_SUBAGENT_CHILD) {
+      return CHILD_SUBAGENT_MODE === "explore" || CHILD_SUBAGENT_MODE === "execute"
+        ? CHILD_SUBAGENT_MODE
+        : "generic";
+    }
+    return state.mode;
+  }
+
+  function isExploreRuntime(): boolean {
+    return getRuntimeMode() === "explore";
+  }
+
+  function isExecuteRuntime(): boolean {
+    return getRuntimeMode() === "execute";
+  }
+
+  function isChildExploreRuntime(): boolean {
+    return IS_SUBAGENT_CHILD && CHILD_SUBAGENT_MODE === "explore";
+  }
 
   function getActiveToolNames(): string[] {
     const active = pi.getActiveTools() as Array<string | { name?: string }>;
@@ -1812,49 +1877,6 @@ export default function (pi: ExtensionAPI) {
     };
   }
 
-  function clearLiveSubagentBatches() {
-    liveExploreBatch = undefined;
-    liveExecuteBatch = undefined;
-    liveHarnessBatch = undefined;
-  }
-
-  function setLiveExploreBatch(details: ExploreSubagentToolDetails) {
-    liveExploreBatch = {
-      topic: details.topic,
-      completed: details.completed,
-      total: details.total,
-      personas: EXPLORE_SUBAGENT_ROLES.map((role) => role.persona),
-      snapshots: details.snapshots,
-    };
-    liveExecuteBatch = undefined;
-    liveHarnessBatch = undefined;
-  }
-
-  function setLiveExecuteBatch(details: ExecuteSubagentToolDetails) {
-    liveExecuteBatch = {
-      objective: details.objective,
-      completed: details.completed,
-      total: details.total,
-      roles: [...details.roles],
-      snapshots: details.snapshots,
-    };
-    liveExploreBatch = undefined;
-    liveHarnessBatch = undefined;
-  }
-
-  function setLiveHarnessBatch(details: HarnessSubagentsToolDetails) {
-    liveHarnessBatch = {
-      subject: details.subject,
-      mode: details.mode,
-      completed: details.completed,
-      total: details.total,
-      subagents: details.subagents,
-      snapshots: details.snapshots,
-    };
-    liveExploreBatch = undefined;
-    liveExecuteBatch = undefined;
-  }
-
   function resetExploreTracking() {
     exploreTotals = createExploreEvidenceTotals();
     exploreChain = createExploreEvidenceChain();
@@ -1865,7 +1887,7 @@ export default function (pi: ExtensionAPI) {
   }
 
   function beginExploreEvidenceChainIfNeeded() {
-    if (state.mode !== "explore") return;
+    if (!isExploreRuntime()) return;
     if (!exploreChain.active) {
       exploreChain = createExploreEvidenceChain();
       exploreChain.active = true;
@@ -1969,17 +1991,9 @@ export default function (pi: ExtensionAPI) {
   }
 
   function updateUI(ctx: ExtensionContext) {
-    if (!ctx.hasUI) return;
+    if (IS_SUBAGENT_CHILD || !ctx.hasUI) return;
 
-    const liveWidget = liveHarnessBatch
-      ? [formatLiveHarnessBatchStatus(liveHarnessBatch)]
-      : liveExploreBatch
-        ? [formatLiveExploreBatchStatus(liveExploreBatch)]
-        : liveExecuteBatch
-          ? [formatLiveExecuteBatchStatus(liveExecuteBatch)]
-          : undefined;
-
-    ctx.ui.setWidget("harness", liveWidget);
+    ctx.ui.setWidget("harness", undefined);
 
     if (state.mode === "explore") {
       ctx.ui.setStatus(
@@ -2008,6 +2022,70 @@ export default function (pi: ExtensionAPI) {
     exploreChain = createExploreEvidenceChain();
   }
 
+  function getExploreGateAssessment(finalText: string) {
+    return evaluateExploreEvidenceGate({
+      scope: IS_SUBAGENT_CHILD ? "child" : "parent",
+      searches: exploreChain.searches,
+      fetches: exploreChain.fetches,
+      subagentRuns: exploreChain.subagentRuns,
+      browserResearchCalls: exploreChain.browserResearchCalls,
+      uniqueSourceCount: exploreChain.sources.size,
+      finalText,
+    });
+  }
+
+  function formatExploreGateMissingItems(items: string[]): string[] {
+    return items.map((item, index) => `${index + 1}. ${item}`);
+  }
+
+  function buildExploreKeepResearchingMessage(finalText: string): string {
+    const assessment = getExploreGateAssessment(finalText);
+    const lines: string[] = [];
+
+    if (IS_SUBAGENT_CHILD) {
+      lines.push("SYSTEM ENFORCEMENT: Do not conclude yet.");
+      lines.push("Keep researching until the external-evidence gate passes.");
+      lines.push("");
+      lines.push("Missing before conclusion:");
+      lines.push(...formatExploreGateMissingItems(assessment.missingCompletion));
+      lines.push("");
+      lines.push("Use only read-only local inspection plus harness_web_search / harness_web_fetch.");
+      lines.push("Do not call harness_subagents from this child process.");
+      lines.push("When you have enough evidence, wait for the next instruction to conclude.");
+      return lines.join("\n");
+    }
+
+    lines.push("SYSTEM ENFORCEMENT: Do not conclude the /explore run yet.");
+    lines.push("The external-evidence gate is still open.");
+    lines.push("");
+    lines.push("Missing before completion:");
+    lines.push(...formatExploreGateMissingItems(assessment.missingCompletion));
+    lines.push("");
+    lines.push("Before the next answer, you MUST:");
+    lines.push("1. Call harness_subagents to run the isolated OPT/PRA/SKP/EMP subagents in parallel if that is still missing.");
+    lines.push("2. Use harness_web_search for focused external queries when you need additional evidence beyond the subagent pass.");
+    lines.push("3. Use harness_web_fetch on relevant URLs before relying on them in the synthesis.");
+    lines.push("4. Revise the debate so every external claim cites explicit source URLs.");
+    lines.push("5. Mark unsupported claims as [UNVERIFIED] or strike them from the synthesis.");
+    lines.push("6. Keep local codebase claims tied to file paths; keep external claims tied to URLs.");
+    lines.push("");
+    lines.push("Continue exploring; do not conclude until the gate passes.");
+    return lines.join("\n");
+  }
+
+  function buildExploreReadyToConcludeMessage(): string {
+    return [
+      "SYSTEM ENFORCEMENT: Evidence bar met.",
+      "Stop researching and conclude now.",
+      "",
+      "Return the final markdown in the required format.",
+      "- Cite local claims with file paths.",
+      "- Cite external claims with explicit URLs.",
+      "- Keep unsupported claims marked [UNVERIFIED].",
+      "- Do not call more tools unless a citation is still missing.",
+    ].join("\n");
+  }
+
   // ── State persistence ─────────────────────────────────────────────
 
   pi.on("session_start", async (_event, ctx) => {
@@ -2015,7 +2093,6 @@ export default function (pi: ExtensionAPI) {
     baselineActiveTools = getActiveToolNames();
     resetExploreTracking();
     resetExecuteTracking();
-    clearLiveSubagentBatches();
 
     for (const entry of ctx.sessionManager.getEntries()) {
       if (entry.type === "custom" && entry.customType === "cognitive-harness-state") {
@@ -2030,6 +2107,9 @@ export default function (pi: ExtensionAPI) {
     }
 
     if (IS_SUBAGENT_CHILD) {
+      state.mode = CHILD_SUBAGENT_MODE === "explore" || CHILD_SUBAGENT_MODE === "execute"
+        ? CHILD_SUBAGENT_MODE
+        : "off";
       const childTools = (CHILD_SUBAGENT_TOOLS.length > 0 ? CHILD_SUBAGENT_TOOLS : [...SAFE_SUBAGENT_CHILD_TOOL_NAMES])
         .filter((name) => getAllToolNames().includes(name));
       pi.setActiveTools(childTools);
@@ -2050,7 +2130,6 @@ export default function (pi: ExtensionAPI) {
       saveState();
       resetExploreTracking();
       resetExecuteTracking();
-      clearLiveSubagentBatches();
       setModeTools("explore");
       updateUI(ctx);
       ctx.ui.notify("🧠 Explore mode activated — isolated subagents + structured web evidence required", "info");
@@ -2071,7 +2150,6 @@ export default function (pi: ExtensionAPI) {
       saveState();
       endExploreEvidenceChain();
       resetExecuteTracking();
-      clearLiveSubagentBatches();
       setModeTools("execute");
       updateUI(ctx);
       ctx.ui.notify("⚙️ Execute mode activated — orchestration-only parent + isolated role subagents enabled", "info");
@@ -2088,7 +2166,6 @@ export default function (pi: ExtensionAPI) {
       saveState();
       endExploreEvidenceChain();
       resetExecuteTracking();
-      clearLiveSubagentBatches();
       setModeTools("off");
       updateUI(ctx);
       ctx.ui.notify("Cognitive harness disabled", "info");
@@ -2129,14 +2206,14 @@ export default function (pi: ExtensionAPI) {
   // ── External evidence tracking ─────────────────────────────────────
 
   pi.on("agent_start", async () => {
-    if (state.mode !== "explore") return;
+    if (!isExploreRuntime()) return;
     if (!exploreChain.active) {
       beginExploreEvidenceChainIfNeeded();
     }
   });
 
   pi.on("tool_result", async (event, ctx) => {
-    if (state.mode === "explore") {
+    if (isExploreRuntime()) {
       if (event.toolName === "harness_subagents" || event.toolName === "harness_explore_subagents") {
         const details = event.details as HarnessSubagentsToolDetails | ExploreSubagentToolDetails | undefined;
         markSubagentUsage(details as { results: Array<{ citations: string[]; searches?: number; fetches?: number; toolCalls?: Record<string, number> }> } | undefined);
@@ -2170,35 +2247,31 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    if (state.mode === "execute" && (event.toolName === "harness_subagents" || event.toolName === "harness_execute_subagents")) {
+    if (isExecuteRuntime() && (event.toolName === "harness_subagents" || event.toolName === "harness_execute_subagents")) {
       const details = event.details as HarnessSubagentsToolDetails | ExecuteSubagentToolDetails | undefined;
       markExecuteSubagentUsage(details as { results: Array<{ role: string }> } | undefined);
       updateUI(ctx);
     }
   });
 
-  pi.on("agent_end", async (event, ctx) => {
-    if (state.mode !== "explore" || !exploreChain.active) return;
+  pi.on("turn_end", async (event, ctx) => {
+    if (!isExploreRuntime() || !exploreChain.active) return;
 
-    const finalText = lastAssistantMessageText(event.messages as any[]);
-    const usedSubagents = exploreChain.subagentRuns > 0;
-    const usedDiscovery = exploreChain.searches > 0 || exploreChain.browserResearchCalls > 0;
-    const usedInspection = exploreChain.fetches > 0;
-    const enoughSources = exploreChain.sources.size >= 2;
-    const citedSources = hasExternalCitation(finalText);
-    const compliant = usedSubagents && usedDiscovery && usedInspection && enoughSources && citedSources;
+    const finalText = event.message?.role === "assistant"
+      ? extractAssistantText(event.message as any)
+      : "";
+    const assessment = getExploreGateAssessment(finalText);
+    const hasToolResults = event.toolResults.length > 0;
 
-    if (compliant) {
-      endExploreEvidenceChain();
-      updateUI(ctx);
+    if (hasToolResults) {
+      if (isChildExploreRuntime() && assessment.researchReady && !exploreChain.readyToConcludeSent) {
+        exploreChain.readyToConcludeSent = true;
+        pi.sendUserMessage(buildExploreReadyToConcludeMessage(), { deliverAs: "steer" });
+      }
       return;
     }
 
-    if (exploreChain.retries >= 1) {
-      ctx.ui.notify(
-        "Explore output still lacks sufficient external evidence after an automatic retry. Review citations manually or rerun /explore with a narrower topic.",
-        "warning",
-      );
+    if (assessment.completionReady) {
       endExploreEvidenceChain();
       updateUI(ctx);
       return;
@@ -2207,30 +2280,22 @@ export default function (pi: ExtensionAPI) {
     exploreChain.retries += 1;
     exploreTotals.retries += 1;
     updateUI(ctx);
-    ctx.ui.notify("External-evidence gate triggered — forcing an evidence-backed revision pass.", "warning");
+    if (!IS_SUBAGENT_CHILD) {
+      ctx.ui.notify("External-evidence gate triggered — continuing exploration before conclusion.", "warning");
+    }
+    pi.sendUserMessage(buildExploreKeepResearchingMessage(finalText), { deliverAs: "steer" });
+  });
 
-    pi.sendUserMessage(
-      [
-        {
-          type: "text",
-          text: [
-            "SYSTEM ENFORCEMENT: The previous /explore output is not accepted yet.",
-            "It did not show enough external evidence usage and/or explicit URL citations.",
-            "",
-            "Before revising, you MUST:",
-            "1. Call harness_subagents to run the isolated OPT/PRA/SKP/EMP subagents in parallel if you have not already.",
-            "2. Use harness_web_search for focused external queries when you need additional evidence beyond the subagent pass.",
-            "3. Use harness_web_fetch on relevant URLs before relying on them in the synthesis.",
-            "4. Revise the debate so every external claim cites explicit source URLs.",
-            "5. Mark unsupported claims as [UNVERIFIED] or strike them from the synthesis.",
-            "6. Keep local codebase claims tied to file paths; keep external claims tied to URLs.",
-            "",
-            "Return only the revised exploration update.",
-          ].join("\n"),
-        },
-      ],
-      { deliverAs: "followUp" },
-    );
+  pi.on("agent_end", async (_event, ctx) => {
+    if (!isExploreRuntime() || !exploreChain.active) return;
+    if (!IS_SUBAGENT_CHILD) {
+      ctx.ui.notify(
+        "Explore run ended while the external-evidence gate was still open. Review the final citations manually before accepting the result.",
+        "warning",
+      );
+    }
+    endExploreEvidenceChain();
+    updateUI(ctx);
   });
 
   // ── Tool enforcement ──────────────────────────────────────────────
@@ -2301,11 +2366,23 @@ export default function (pi: ExtensionAPI) {
   // ── System prompt injection ───────────────────────────────────────
 
   pi.on("before_agent_start", async (event) => {
-    if (state.mode === "off") return;
-
     let injection = "";
 
-    if (state.mode === "explore") {
+    if (IS_SUBAGENT_CHILD) {
+      if (CHILD_SUBAGENT_MODE === "explore") {
+        injection = `
+[HARNESS SUBAGENT: EXPLORE CHILD MODE ACTIVE]
+You are inside a child explore subprocess, not the parent /explore orchestrator.
+- Do not call harness_subagents recursively; it is unavailable here.
+- Use read-only local inspection plus harness_web_search and harness_web_fetch to gather evidence.
+- Keep researching until the external-evidence gate passes.
+- When the harness tells you "Evidence bar met", stop researching and conclude in the required markdown format.
+- External claims must cite explicit URLs; local claims must cite file paths.
+- Unsupported claims must be marked [UNVERIFIED].
+Evidence collected in this child so far: ${exploreTotals.searches} searches, ${exploreTotals.fetches} fetches, ${exploreTotals.sources.size} unique URLs.
+`;
+      }
+    } else if (state.mode === "explore") {
       injection = `
 [COGNITIVE HARNESS: EXPLORE MODE ACTIVE]
 You are operating in divergent thinking mode with 4-persona debate.
@@ -2328,9 +2405,7 @@ External-evidence policy:
 - A synthesis is not acceptable unless it cites explicit source URLs or marks a claim [UNVERIFIED].
 Evidence collected this session so far: ${exploreTotals.subagentRuns} subagent rounds, ${exploreTotals.searches} searches, ${exploreTotals.fetches} fetches, ${exploreTotals.sources.size} unique URLs.
 `;
-    }
-
-    if (state.mode === "execute") {
+    } else if (state.mode === "execute") {
       const passed = state.acStatuses.filter((a) => a.status === "pass").length;
       const total = state.acStatuses.length;
 
@@ -2541,11 +2616,12 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
       const descriptors = definitions.map(({ role, label, icon }) => ({ role, label, icon }));
       const modelSpec = modelToCliSpec(ctx.model as { provider?: string; id?: string } | undefined);
       const thinkingLevel = pi.getThinkingLevel();
+      const genericSubagentChildMode = resolveGenericSubagentChildMode(getRuntimeMode());
       let latestSnapshots: HarnessSubagentSnapshot<string>[] = [];
       const batchStartedAt = new Date().toISOString();
 
       const specs: HarnessSubagentSpec<string>[] = definitions.map((subagent) => ({
-        mode: "generic",
+        mode: genericSubagentChildMode,
         role: subagent.role,
         label: `${subagent.icon ? `${subagent.icon} ` : ""}${subagent.label}`,
         task: subagent.task,
@@ -2559,7 +2635,6 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
         signal,
       }));
 
-      setLiveHarnessBatch(buildHarnessSubagentsDetails(params.subject, mode, descriptors, 0, descriptors.length, [], []));
       updateUI(ctx);
 
       try {
@@ -2579,7 +2654,6 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
           onSnapshot: (snapshots, completed, total, batchResults) => {
             latestSnapshots = snapshots;
             const details = buildHarnessSubagentsDetails(params.subject, mode, descriptors, completed, total, batchResults, snapshots);
-            setLiveHarnessBatch(details);
             updateUI(ctx);
             onUpdate?.({
               content: [{ type: "text", text: summarizeHarnessSubagentsProgress(details) }],
@@ -2610,7 +2684,6 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
           details,
         };
       } finally {
-        clearLiveSubagentBatches();
         updateUI(ctx);
       }
     },
@@ -2684,7 +2757,6 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
         signal,
       }));
 
-      setLiveExploreBatch(buildExploreSubagentDetails(params.topic, 0, EXPLORE_SUBAGENT_ROLES.length, [], []));
       updateUI(ctx);
 
       try {
@@ -2693,7 +2765,6 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
           onSnapshot: (snapshots, completed, total, batchResults) => {
             latestSnapshots = snapshots;
             const details = buildExploreSubagentDetails(params.topic, completed, total, batchResults, snapshots);
-            setLiveExploreBatch(details);
             updateUI(ctx);
             onUpdate?.({
               content: [{ type: "text", text: summarizeExploreSubagentProgress(details) }],
@@ -2722,7 +2793,6 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
           details,
         };
       } finally {
-        clearLiveSubagentBatches();
         updateUI(ctx);
       }
     },
@@ -2802,7 +2872,6 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
         };
       });
 
-      setLiveExecuteBatch(buildExecuteSubagentDetails(params.objective, mode, roles, 0, roles.length, [], []));
       updateUI(ctx);
 
       try {
@@ -2822,7 +2891,6 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
           onSnapshot: (snapshots, completed, total, batchResults) => {
             latestSnapshots = snapshots;
             const details = buildExecuteSubagentDetails(params.objective, mode, roles, completed, total, batchResults, snapshots);
-            setLiveExecuteBatch(details);
             updateUI(ctx);
             onUpdate?.({
               content: [{ type: "text", text: summarizeExecuteSubagentProgress(details) }],
@@ -2853,7 +2921,6 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
           details,
         };
       } finally {
-        clearLiveSubagentBatches();
         updateUI(ctx);
       }
     },
@@ -3155,7 +3222,6 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
       if (next === "explore") resetExploreTracking();
       if (next === "execute") resetExecuteTracking();
       if (next !== "explore") endExploreEvidenceChain();
-      clearLiveSubagentBatches();
       setModeTools(next);
       updateUI(ctx);
       ctx.ui.notify(`Harness: ${next === "off" ? "disabled" : next}`, "info");
