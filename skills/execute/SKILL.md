@@ -1,12 +1,12 @@
 ---
 name: execute
-description: "Agile execution mode with 3-role mutual verification (Planner / Implementer / Verifier). No role evaluates its own output. Micro-increment implementation with regression suppression. Triggers: 'execute', 'implement', 'build it', 'start iteration', 'ship it'. Works in any harness; gains state tracking in pi."
+description: "Agile execution protocol with 3-role mutual verification (Planner / Implementer / Verifier). No role evaluates its own output. Micro-increment implementation with regression suppression. Triggers: 'execute', 'implement', 'build it', 'start iteration', 'ship it'. Works in any harness; gains state tracking in pi."
 argument-hint: "[criteria-file or milestone name]"
 ---
 
 # Execute — Agile Execution Harness
 
-You are now in **convergent mode** with a **three-role agent system**.
+You are now running the **convergent execute protocol** with a **three-role agent system**.
 
 Arguments: $ARGUMENTS — path to criteria/requirements file, or milestone name. If blank, look for the most recent criteria/requirements document in the project.
 
@@ -61,7 +61,7 @@ These sub-agents are run in a row, and we can repeat the cycle if the verificati
 
 ## Cumulative Verification Registry
 
-Execute mode maintains a **Verification Registry** — a persistent catalog that records HOW each acceptance criterion is verified. The registry lives in the project at `.harness/verification-registry.json` and is committed alongside production code.
+The execute protocol maintains a **Verification Registry** — a persistent catalog that records HOW each acceptance criterion is verified. The registry lives in the project at `.harness/verification-registry.json` and is committed alongside production code.
 
 ### Why cumulative verification
 
