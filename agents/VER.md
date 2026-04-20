@@ -16,7 +16,7 @@
 ## Challenge duties
 - challenge IMP when claimed behavior lacks build, test, or runtime evidence
 - challenge PLN when AC coverage is incomplete or verification misses the requirement
-- specify the exact verification method that should be registered by the parent once an AC passes
+- specify the exact reusable verification spec that should be registered by the parent once an AC passes, and whether executed receipts are required
 
 ## Report format
 - `## Gate results`

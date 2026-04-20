@@ -2,6 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 import { isToolCallEventType } from "@mariozechner/pi-coding-agent";
 import { Container, Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
+import { createHash, randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
@@ -54,7 +55,18 @@ import {
   writeManagedSessionFile,
   writeManagedWorktreeLease,
 } from "./managed-worktrees.js";
-import { readRegistry, writeRegistry } from "./verification-registry.js";
+import {
+  appendVerificationReceipt,
+  deriveVerificationStatuses,
+  getGitHead,
+  hashVerificationSpec,
+  readRegistry,
+  readVerificationReceiptStore,
+  resolveVerificationRuntimePaths,
+  selectVerificationSpecs,
+  upsertVerificationSpec,
+  writeRegistry,
+} from "./verification-registry.js";
 import {
   type HarnessSubagentRunResult,
   type HarnessSubagentSnapshot,
@@ -262,7 +274,7 @@ function decodeManagedBindingFromEnv(rawValue: string | undefined): ManagedSessi
   }
 }
 
-// ─── Verification Registry ───────────────────────────────────────────
+// ─── Verification Accumulation ───────────────────────────────────────
 
 const CURRENT_EXTENSION_PATH = fileURLToPath(import.meta.url);
 const IS_SUBAGENT_CHILD = process.env.HARNESS_SUBAGENT_CHILD === "1";
@@ -297,6 +309,7 @@ const SAFE_EXECUTE_TOOL_NAMES = new Set([
   "harness_execute_subagents",
   INTERNAL_MANAGED_WORKTREE_TOOL,
   "harness_verify_register",
+  "harness_verify_run",
   "harness_verify_list",
   "harness_commit",
 ]);
@@ -686,12 +699,46 @@ function formatLiveToolName(toolName: string): string {
       return "fetch";
     case "harness_verify_register":
       return "register";
+    case "harness_verify_run":
+      return "verify";
     case "harness_verify_list":
       return "registry";
     case "harness_commit":
       return "commit";
     default:
       return toolName;
+  }
+}
+
+function createVerificationReceiptId(): string {
+  return `vr-${Date.now().toString(36)}-${randomBytes(4).toString("hex")}`;
+}
+
+function hashToolOutput(value: string): string | undefined {
+  if (!value) return undefined;
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function summarizeToolOutput(value: string | undefined, maxChars = 160): string | undefined {
+  return summarizeSubagentText(value, maxChars) || undefined;
+}
+
+function summarizeVerificationBindings(bindings: Array<{ binding_id: string }>): string {
+  return bindings.map((binding) => binding.binding_id).join(", ");
+}
+
+function summarizeVerificationStatusForDisplay(status: string): string {
+  switch (status) {
+    case "pass":
+      return "PASS";
+    case "fail":
+      return "FAIL";
+    case "stale":
+      return "STALE";
+    case "missing":
+      return "MISSING";
+    default:
+      return status.toUpperCase();
   }
 }
 
@@ -2342,15 +2389,6 @@ export default function (pi: ExtensionAPI) {
       ctx.ui.setWidget("harness", widgetLines, { placement: "belowEditor" });
     }
 
-    if (activeProtocol === "explore") {
-      const managedSuffix = managedStatus ? ` 🧱${managedStatus}` : "";
-      ctx.ui.setStatus(
-        "harness",
-        `🧠 EXPLORE 🤖${exploreTotals.subagentRuns} 🔎${exploreTotals.searches} 🌐${exploreTotals.fetches} 🔗${exploreTotals.sources.size}${managedSuffix}`,
-      );
-      return;
-    }
-
     if (activeProtocol === "execute") {
       const passed = state.acStatuses.filter((a) => a.status === "pass").length;
       const failed = state.acStatuses.filter((a) => a.status === "fail").length;
@@ -2896,10 +2934,11 @@ This parent /execute agent is an ORCHESTRATOR. Direct write/edit/bash implementa
 Use harness_subagents to invoke real isolated PLN / IMP / VER subprocess agents. Use sequential mode for PLN → IMP → VER handoffs.
 AC Status: ${passed}/${total} passed. Regressions: ${state.regressionCount}. Commits: ${state.commitCount}.
 ${state.currentIncrement ? `Current increment: ${state.currentIncrement}` : ""}
-VERIFICATION REGISTRY: VER must maintain a cumulative Verification Registry (.harness/verification-registry.json).
-- After confirming an AC passes, VER MUST call harness_verify_register to record the verification method.
-- Before regression checks, VER MUST call harness_verify_list and re-run every registered verification.
-- A passing AC without a registered verification is a gap that PLN should challenge.
+VERIFICATION ACCUMULATION: VER must maintain cumulative verification specs in .harness/verification-registry.json and runtime receipts under the repo's git common dir.
+- After confirming an AC passes, VER MUST call harness_verify_register to define or update the reusable verification spec.
+- Registration alone does NOT prove a pass; VER MUST use harness_verify_run to append executed receipts for automated checks.
+- Before regression checks, VER MUST call harness_verify_list, inspect receipt-derived status, and re-run missing/stale/needed checks with harness_verify_run.
+- A passing AC without a reusable verification spec is a gap that PLN should challenge.
 - Planning, implementation, and verification work should be delegated to harness_subagents rather than role-played in the parent context.
 After VER confirms all gates pass and no regressions for an increment, VER MUST call the harness_commit tool to commit and push the changes before proceeding to the next increment.
 `;
@@ -3470,24 +3509,31 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
     },
   });
 
-  // ── Verification Registry tools ───────────────────────────────────
+  // ── Verification accumulation tools ───────────────────────────────
 
   pi.registerTool({
     name: "harness_verify_register",
-    label: "Register Verification Method",
-    description: "Register or update a verification method for an acceptance criterion. VER calls this after confirming an AC passes, recording HOW it was verified so future regression checks can re-run the same verification.",
-    promptSnippet: "Register a reproducible verification method for an AC (during an active /execute run, VER role only)",
+    label: "Register Verification Spec",
+    description: "Register or update a reusable verification spec for an acceptance criterion. This records HOW a check should be verified, but does not claim that it passed.",
+    promptSnippet: "Register or update a reusable verification spec for an AC (during an active /execute run, VER role only)",
     promptGuidelines: [
-      "Call harness_verify_register after marking an AC as passed to record the verification method.",
-      "Include the exact command to re-run the verification and any test files involved.",
+      "Call harness_verify_register after marking an AC as passed to define or update the reusable verification spec.",
+      "Include the exact command to execute and any relevant files when the verification can be automated.",
       "Prefer automated, reproducible strategies (automated-test, type-check, build-output) over manual-check.",
+      "Registration alone is not proof of pass; automated checks should then be executed with harness_verify_run.",
     ],
     parameters: Type.Object({
       ac_id: Type.String({ description: "AC identifier, e.g. 'AC-1.1'" }),
+      check_id: Type.Optional(Type.String({ description: "Stable reusable check identifier, e.g. 'login-email'. Defaults to ac_id when omitted." })),
       requirement: Type.String({ description: "What this AC requires (human-readable)" }),
-      source: Type.Optional(Type.String({ description: "Source criteria document, e.g. 'iteration-4-criteria.md'" })),
+      source: Type.Optional(Type.String({ description: "Source criteria document, e.g. 'iteration-10-criteria.md'" })),
       strategy: Type.String({ description: "Verification strategy: 'automated-test', 'type-check', 'build-output', 'lint-rule', 'manual-check', etc." }),
-      command: Type.Optional(Type.String({ description: "Exact command to re-run this verification, e.g. 'npm test -- --grep login'" })),
+      mode: Type.Optional(Type.Union([
+        Type.Literal("automated"),
+        Type.Literal("manual"),
+      ], { description: "Verification mode. Defaults to automated unless strategy is manual-check." })),
+      blocking: Type.Optional(Type.Boolean({ description: "Whether this spec is gating. Defaults to true for automated checks and false for manual checks." })),
+      command: Type.Optional(Type.String({ description: "Exact command to execute this verification, e.g. 'npm test -- --grep login'" })),
       files: Type.Optional(Type.Array(Type.String(), { description: "Test or verification files involved" })),
       description: Type.String({ description: "Human-readable explanation of what's being checked and how" }),
       increment: Type.Optional(Type.String({ description: "Current increment, e.g. 'INC-1'" })),
@@ -3499,46 +3545,186 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
       }
 
       const registry = await readRegistry(ctx.cwd);
-      const isUpdate = params.ac_id in registry.entries;
+      const next = upsertVerificationSpec(registry, {
+        ...params,
+        increment: params.increment ?? state.currentIncrement,
+      });
+      await writeRegistry(ctx.cwd, next.registry);
 
-      registry.entries[params.ac_id] = {
-        requirement: params.requirement,
-        source: params.source,
-        verification: {
-          strategy: params.strategy,
-          command: params.command,
-          files: params.files,
-          description: params.description,
-        },
-        registeredAt: isUpdate
-          ? registry.entries[params.ac_id].registeredAt
-          : (params.increment ?? state.currentIncrement ?? "unknown"),
-        lastVerifiedAt: params.increment ?? state.currentIncrement,
-        lastResult: "pass",
-      };
-
-      await writeRegistry(ctx.cwd, registry);
-
-      const count = Object.keys(registry.entries).length;
-      const verb = isUpdate ? "Updated" : "Registered";
-      const summary = `${verb} verification for ${params.ac_id} (${params.strategy}). Registry: ${count} entries total.`;
+      const totalSpecs = Object.keys(next.registry.specs).length;
+      const bindingCount = next.registry.specs[next.checkId]?.bindings.length ?? 0;
+      const summary = `${next.isUpdate ? "Updated" : "Registered"} verification spec ${next.checkId}. Spec catalog: ${totalSpecs} total. Bindings on spec: ${bindingCount}.`;
 
       return {
         content: [{ type: "text", text: summary }],
-        details: { ac_id: params.ac_id, isUpdate, totalEntries: count },
+        details: {
+          checkId: next.checkId,
+          isUpdate: next.isUpdate,
+          isBindingUpdate: next.isBindingUpdate,
+          totalSpecs,
+          bindingCount,
+        },
       };
     },
     renderCall(args, theme, context) {
+      const target = typeof args.check_id === "string" && args.check_id.trim() ? args.check_id.trim() : args.ac_id;
       return new Text(
-        `${compactToolTitle(theme, context, "verify_register")} ${theme.fg("accent", args.ac_id)}${theme.fg("muted", ` · ${args.strategy}`)}`,
+        `${compactToolTitle(theme, context, "verify_register")} ${theme.fg("accent", target)}${theme.fg("muted", ` · ${args.strategy}`)}`,
         0,
         0,
       );
     },
     renderResult(result, options, theme, context) {
-      const details = result.details as { isUpdate?: boolean; totalEntries?: number } | undefined;
+      const details = result.details as { isUpdate?: boolean; totalSpecs?: number } | undefined;
       const summary = details
-        ? `${details.isUpdate ? "updated" : "registered"} · ${details.totalEntries ?? 0} entries`
+        ? `${details.isUpdate ? "updated" : "registered"} · ${details.totalSpecs ?? 0} specs`
+        : undefined;
+      return renderCompactToolResult(result, options, theme, context, summary);
+    },
+  });
+
+  pi.registerTool({
+    name: "harness_verify_run",
+    label: "Run Verification Specs",
+    description: "Execute automated verification specs and append immutable runtime receipts. VER uses this to produce authoritative executed evidence.",
+    promptSnippet: "Execute automated verification specs and append immutable receipts (during an active /execute run)",
+    promptGuidelines: [
+      "Call harness_verify_run after registering automated specs that need executed evidence.",
+      "If no check_ids are provided, this tool should run automated blocking specs by default.",
+      "Each execution appends a new receipt; do not treat registration alone as proof of pass.",
+    ],
+    parameters: Type.Object({
+      check_ids: Type.Optional(Type.Array(Type.String(), { description: "Exact check_ids to execute. If omitted, runs automated blocking specs." })),
+      filter: Type.Optional(Type.String({ description: "Optional prefix filter for check_ids or bound AC IDs." })),
+      include_nonblocking: Type.Optional(Type.Boolean({ description: "Include advisory/non-blocking automated specs in the run set." })),
+      timeout_seconds: Type.Optional(Type.Number({ description: "Optional per-check timeout in seconds." })),
+    }),
+    renderShell: "self",
+    async execute(_toolCallId, params, signal, onUpdate, ctx) {
+      if (!isExecuteRuntime()) {
+        throw new Error("harness_verify_run is only available during an active /execute run.");
+      }
+
+      const registry = await readRegistry(ctx.cwd);
+      const specs = selectVerificationSpecs(registry, {
+        check_ids: params.check_ids,
+        filter: params.filter,
+        automatedOnly: true,
+        includeNonBlocking: params.include_nonblocking ?? Boolean(params.check_ids?.length),
+      });
+
+      if (params.check_ids?.length) {
+        const found = new Set(specs.map((spec) => spec.check_id));
+        const missing = params.check_ids.filter((checkId) => !found.has(checkId.trim()));
+        if (missing.length > 0) {
+          throw new Error(`Unknown verification spec(s): ${missing.join(", ")}`);
+        }
+      }
+
+      if (specs.length === 0) {
+        return {
+          content: [{ type: "text", text: "No automated verification specs matched the requested selection." }],
+          details: { results: [], totalRun: 0, passed: 0, failed: 0 },
+        };
+      }
+
+      const head = await getGitHead(ctx.cwd);
+      const runtimePaths = await resolveVerificationRuntimePaths(ctx.cwd);
+      const perCheckTimeout = typeof params.timeout_seconds === "number" && params.timeout_seconds > 0
+        ? Math.round(params.timeout_seconds * 1000)
+        : undefined;
+      const runResults: Array<{
+        check_id: string;
+        receipt_id: string;
+        status: "pass" | "fail";
+        exitCode: number;
+        command: string;
+      }> = [];
+
+      for (const spec of specs) {
+        const command = spec.verification.command;
+        if (!command) {
+          throw new Error(`Automated verification spec ${spec.check_id} is missing a command.`);
+        }
+
+        onUpdate?.({
+          content: [{ type: "text", text: `Running verification ${spec.check_id}: ${command}` }],
+          details: { stage: "running", check_id: spec.check_id, command },
+        });
+
+        const startedAt = new Date().toISOString();
+        const startedMs = Date.now();
+        const execResult = await pi.exec("bash", ["-lc", command], {
+          signal,
+          timeout: perCheckTimeout,
+        });
+        const finishedAt = new Date().toISOString();
+        const durationMs = Date.now() - startedMs;
+
+        const receipt = {
+          receipt_id: createVerificationReceiptId(),
+          check_id: spec.check_id,
+          spec_hash: hashVerificationSpec(spec),
+          status: execResult.code === 0 ? "pass" : "fail",
+          mode: spec.verification.mode,
+          blocking: spec.verification.blocking,
+          command,
+          exit_code: execResult.code,
+          started_at: startedAt,
+          finished_at: finishedAt,
+          duration_ms: durationMs,
+          commit_hash: head.full,
+          commit_short: head.short,
+          git_common_dir: runtimePaths.gitCommonDir,
+          worktree_path: ctx.cwd,
+          stdout_sha256: hashToolOutput(execResult.stdout),
+          stderr_sha256: hashToolOutput(execResult.stderr),
+          stdout_preview: summarizeToolOutput(execResult.stdout),
+          stderr_preview: summarizeToolOutput(execResult.stderr),
+        };
+
+        await appendVerificationReceipt(ctx.cwd, receipt);
+        runResults.push({
+          check_id: spec.check_id,
+          receipt_id: receipt.receipt_id,
+          status: receipt.status,
+          exitCode: execResult.code,
+          command,
+        });
+      }
+
+      const passed = runResults.filter((result) => result.status === "pass").length;
+      const failed = runResults.length - passed;
+      if (failed > 0) {
+        state.regressionCount += failed;
+        saveState();
+        updateUI(ctx);
+      }
+
+      const summary = `Executed ${runResults.length} verification spec(s): ${passed} pass, ${failed} fail. Receipts appended under ${runtimePaths.runtimeDir}.`;
+      return {
+        content: [{ type: "text", text: summary }],
+        details: {
+          results: runResults,
+          totalRun: runResults.length,
+          passed,
+          failed,
+          runtimeDir: runtimePaths.runtimeDir,
+        },
+      };
+    },
+    renderCall(args, theme, context) {
+      const scope = Array.isArray(args.check_ids) && args.check_ids.length > 0
+        ? args.check_ids.join(", ")
+        : typeof args.filter === "string" && args.filter.trim()
+          ? args.filter.trim()
+          : "blocking automated";
+      return new Text(`${compactToolTitle(theme, context, "verify_run")} ${theme.fg("accent", scope)}`, 0, 0);
+    },
+    renderResult(result, options, theme, context) {
+      const details = result.details as { totalRun?: number; passed?: number; failed?: number } | undefined;
+      const summary = details
+        ? `${details.totalRun ?? 0} run · ${details.passed ?? 0} pass · ${details.failed ?? 0} fail`
         : undefined;
       return renderCompactToolResult(result, options, theme, context, summary);
     },
@@ -3546,15 +3732,15 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
 
   pi.registerTool({
     name: "harness_verify_list",
-    label: "List Verification Registry",
-    description: "List all registered verification methods from the project's Verification Registry. VER calls this before regression checks to get every verification that must be re-run.",
-    promptSnippet: "List all registered verification methods for regression checks (during an active /execute run)",
+    label: "List Verification Status",
+    description: "List committed verification specs with receipt-derived latest status. VER uses this before regression checks to inspect pass/fail/missing/stale state.",
+    promptSnippet: "List receipt-derived verification status for the current spec catalog (during an active /execute run)",
     promptGuidelines: [
-      "Call harness_verify_list before running regression checks to get all registered verification methods.",
-      "Re-run every listed verification command during regression scans.",
+      "Call harness_verify_list before regression checks to inspect receipt-derived status for the accumulated spec catalog.",
+      "Use the results to decide which specs must be re-run with harness_verify_run.",
     ],
     parameters: Type.Object({
-      filter: Type.Optional(Type.String({ description: "Filter entries by AC ID prefix, e.g. 'AC-1'" })),
+      filter: Type.Optional(Type.String({ description: "Filter specs by check_id prefix or bound AC ID prefix, e.g. 'AC-1' or 'login'" })),
     }),
     renderShell: "self",
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -3563,29 +3749,35 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
       }
 
       const registry = await readRegistry(ctx.cwd);
-      let entries = Object.entries(registry.entries);
+      const store = await readVerificationReceiptStore(ctx.cwd);
+      let entries = await deriveVerificationStatuses(ctx.cwd, registry, store.receipts);
 
       if (params.filter) {
-        entries = entries.filter(([id]) => id.startsWith(params.filter!));
+        const filter = params.filter.trim();
+        entries = entries.filter((entry) => entry.check_id.startsWith(filter) || entry.bindings.some((binding) => binding.binding_id.startsWith(filter)));
       }
 
+      const totalSpecs = Object.keys(registry.specs).length;
       if (entries.length === 0) {
-        const total = Object.keys(registry.entries).length;
         return {
           content: [{ type: "text", text: params.filter
-            ? `No entries matching '${params.filter}'. Registry has ${total} total entries.`
-            : "Verification Registry is empty. Register verifications after confirming ACs pass." }],
-          details: { entries: [], totalEntries: total },
+            ? `No verification specs matching '${params.filter}'. Spec catalog has ${totalSpecs} total spec(s).`
+            : "Verification spec catalog is empty. Register specs before requesting receipt-derived status." }],
+          details: { entries: [], totalSpecs, totalReceipts: store.receipts.length },
         };
       }
 
       const lines: string[] = [];
-      lines.push(`Verification Registry: ${entries.length} entries${params.filter ? ` (filtered: '${params.filter}')` : ""}`);
+      lines.push(`Verification Accumulation: ${entries.length} spec(s) shown${params.filter ? ` (filtered: '${params.filter}')` : ""}`);
+      lines.push(`Committed spec catalog: ${totalSpecs}`);
+      lines.push(`Runtime receipts: ${store.receipts.length}`);
+      lines.push(`Receipt log: ${store.receiptLogPath}`);
       lines.push("");
 
-      for (const [id, entry] of entries) {
-        lines.push(`## ${id}: ${entry.requirement}`);
-        lines.push(`  Strategy: ${entry.verification.strategy}`);
+      for (const entry of entries) {
+        lines.push(`## ${entry.check_id} [${summarizeVerificationStatusForDisplay(entry.status)}]`);
+        lines.push(`  Bindings: ${summarizeVerificationBindings(entry.bindings)}`);
+        lines.push(`  Strategy: ${entry.verification.strategy} | Mode: ${entry.verification.mode} | Blocking: ${entry.verification.blocking ? "yes" : "no"}`);
         if (entry.verification.command) {
           lines.push(`  Command: ${entry.verification.command}`);
         }
@@ -3593,9 +3785,12 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
           lines.push(`  Files: ${entry.verification.files.join(", ")}`);
         }
         lines.push(`  Description: ${entry.verification.description}`);
-        lines.push(`  Registered: ${entry.registeredAt} | Last verified: ${entry.lastVerifiedAt ?? "never"} | Result: ${entry.lastResult ?? "unknown"}`);
-        if (entry.source) {
-          lines.push(`  Source: ${entry.source}`);
+        if (entry.currentHeadReceipt) {
+          lines.push(`  Current HEAD receipt: ${entry.currentHeadReceipt.receipt_id} @ ${entry.currentHeadReceipt.commit_short} => ${entry.currentHeadReceipt.status}`);
+        } else if (entry.latestReceipt) {
+          lines.push(`  Latest receipt: ${entry.latestReceipt.receipt_id} @ ${entry.latestReceipt.commit_short} => ${entry.latestReceipt.status}`);
+        } else {
+          lines.push("  Latest receipt: none");
         }
         lines.push("");
       }
@@ -3603,8 +3798,9 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
       return {
         content: [{ type: "text", text: lines.join("\n") }],
         details: {
-          entries: entries.map(([id, entry]) => ({ id, ...entry })),
-          totalEntries: Object.keys(registry.entries).length,
+          entries,
+          totalSpecs,
+          totalReceipts: store.receipts.length,
         },
       };
     },
@@ -3615,10 +3811,10 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
       return new Text(`${compactToolTitle(theme, context, "verify_list")}${filter}`, 0, 0);
     },
     renderResult(result, options, theme, context) {
-      const details = result.details as { entries?: unknown[]; totalEntries?: number } | undefined;
+      const details = result.details as { entries?: unknown[]; totalSpecs?: number } | undefined;
       const visible = details?.entries?.length ?? 0;
-      const total = details?.totalEntries ?? visible;
-      const summary = `${visible} shown${visible !== total ? ` · ${total} total` : ""}`;
+      const total = details?.totalSpecs ?? visible;
+      const summary = `${visible} shown${visible !== total ? ` · ${total} specs` : ""}`;
       return renderCompactToolResult(result, options, theme, context, summary);
     },
   });

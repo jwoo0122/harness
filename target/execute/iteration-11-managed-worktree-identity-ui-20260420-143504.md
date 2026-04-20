@@ -1,9 +1,9 @@
-# Execution Report: Iteration 10 — Managed Worktree Identity UI
+# Execution Report: Iteration 11 — Managed Worktree Identity UI
 > Generated: 2026-04-20 14:35:08
 > Roles: 📋 PLN | 🔨 IMP | ✅ VER
 
 ## Pre-flight baseline
-- Criteria source: `.iteration-10-criteria.md`
+- Criteria source: local managed-worktree identity UI criteria packet used during execution (not committed in this branch)
 - Existing verification registry loaded via `harness_verify_list`: 18 entries
 - Registry regression baseline:
   - automated registry command in existing entries: `npm run validate:extensions`
@@ -38,7 +38,7 @@ Resolved:
 - moved the helper’s dependency on managed-worktree path checks to a local pure helper while keeping type-only imports from `managed-worktrees`
 - restored protocol status composition while keeping the managed widget separate and persistent
 - updated validators to allow the managed widget without reintroducing the old live protocol widget/dashboard assumptions
-- recorded AC-10.x verification methods in `.harness/verification-registry.json` directly because `harness_verify_register` was unavailable outside an active `/execute` runtime
+- recorded AC-11.x verification methods in `.harness/verification-registry.json` directly because `harness_verify_register` was unavailable outside an active `/execute` runtime
 
 ## Gate results
 - `env node --experimental-strip-types tests/extensions/validate-managed-worktree-identity-ui.mjs` ✅ pass
@@ -50,14 +50,14 @@ Resolved:
 
 | AC | Status | Evidence | Verified by |
 |---|---|---|---|
-| AC-10.1 | ✅ PASS | explicit presentation seam in `extensions/managed-worktree-presentation.ts`; direct deterministic validator in `tests/extensions/validate-managed-worktree-identity-ui.mjs` | `env npm run validate:extensions` |
-| AC-10.2 | ✅ PASS | below-editor widget wiring in `extensions/index.ts`; managed-widget source assertions in `tests/extensions/validate-managed-worktree-identity-ui.mjs` and `tests/extensions/validate-explore-gate.mjs` | `env npm run validate:extensions` |
-| AC-10.3 | ✅ PASS | healthy root / entry / nested rendering cases in `extensions/managed-worktree-presentation.ts` and `tests/extensions/validate-managed-worktree-identity-ui.mjs` | `env npm run validate:extensions` |
-| AC-10.4 | ✅ PASS | degraded provisioning / released / missing / cleanup / outside-target / missing-lease / missing-path cases in `extensions/managed-worktree-presentation.ts` and `tests/extensions/validate-managed-worktree-identity-ui.mjs` | `env npm run validate:extensions` |
-| AC-10.5 | ✅ PASS | compact status fallback retained in `extensions/index.ts`; no `setFooter()` takeover; lifecycle/status markers updated in `tests/extensions/validate-managed-worktree-lifecycle.mjs` | `env npm run validate:extensions` |
-| AC-10.6 | ✅ PASS | current-cwd-driven derivation in `extensions/index.ts`; turn-end refresh plus root/entry/nested/outside-target deterministic cases in `tests/extensions/validate-managed-worktree-identity-ui.mjs` | `env npm run validate:extensions` |
-| AC-10.7 | ✅ PASS | text-first widget/status rendering in `extensions/managed-worktree-presentation.ts`; RPC-compatible string-array assertions in `tests/extensions/validate-managed-worktree-identity-ui.mjs` | `env npm run validate:extensions` |
-| AC-10.8 | ✅ PASS | `package.json` validation chain updated to syntax-check the new seam and run the new UI validator; AC-specific source/behavior checks live in `tests/extensions/validate-managed-worktree-identity-ui.mjs` | `env npm run validate:extensions` |
+| AC-11.1 | ✅ PASS | explicit presentation seam in `extensions/managed-worktree-presentation.ts`; direct deterministic validator in `tests/extensions/validate-managed-worktree-identity-ui.mjs` | `env npm run validate:extensions` |
+| AC-11.2 | ✅ PASS | below-editor widget wiring in `extensions/index.ts`; managed-widget source assertions in `tests/extensions/validate-managed-worktree-identity-ui.mjs` and `tests/extensions/validate-explore-gate.mjs` | `env npm run validate:extensions` |
+| AC-11.3 | ✅ PASS | healthy root / entry / nested rendering cases in `extensions/managed-worktree-presentation.ts` and `tests/extensions/validate-managed-worktree-identity-ui.mjs` | `env npm run validate:extensions` |
+| AC-11.4 | ✅ PASS | degraded provisioning / released / missing / cleanup / outside-target / missing-lease / missing-path cases in `extensions/managed-worktree-presentation.ts` and `tests/extensions/validate-managed-worktree-identity-ui.mjs` | `env npm run validate:extensions` |
+| AC-11.5 | ✅ PASS | compact status fallback retained in `extensions/index.ts`; no `setFooter()` takeover; lifecycle/status markers updated in `tests/extensions/validate-managed-worktree-lifecycle.mjs` | `env npm run validate:extensions` |
+| AC-11.6 | ✅ PASS | current-cwd-driven derivation in `extensions/index.ts`; turn-end refresh plus root/entry/nested/outside-target deterministic cases in `tests/extensions/validate-managed-worktree-identity-ui.mjs` | `env npm run validate:extensions` |
+| AC-11.7 | ✅ PASS | text-first widget/status rendering in `extensions/managed-worktree-presentation.ts`; RPC-compatible string-array assertions in `tests/extensions/validate-managed-worktree-identity-ui.mjs` | `env npm run validate:extensions` |
+| AC-11.8 | ✅ PASS | `package.json` validation chain updated to syntax-check the new seam and run the new UI validator; AC-specific source/behavior checks live in `tests/extensions/validate-managed-worktree-identity-ui.mjs` | `env npm run validate:extensions` |
 
 ## Regression scan
 - Existing automated registry entries rechecked through `env npm run validate:extensions` ✅ pass
@@ -82,4 +82,4 @@ Resolved:
 ## Recommendations
 - Keep future managed-worktree UI changes inside `extensions/managed-worktree-presentation.ts` so state/copy policy stays deterministic and easy to validate.
 - If execute-subagent VER needs to run `npm run` / `node` commands directly in future iterations, revisit the bash-policy prefix ordering separately from this UI work.
-- Commit/push was not performed automatically in this session because the local criteria file `.iteration-10-criteria.md` is untracked and should not be swept into a repository commit without an explicit user decision.
+- Commit/push was not performed automatically in the original implementation session because the criteria packet lived as a local uncommitted file and was intentionally kept out of the branch at that time.

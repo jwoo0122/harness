@@ -52,6 +52,10 @@ assert.ok(
   "updateUI must clear harness status when no managed worktree is bound",
 );
 assert.ok(
+  !indexSource.includes('🧠 EXPLORE'),
+  "extensions/index.ts must not restore the removed explore status copy",
+);
+assert.ok(
   !indexSource.includes('pi.sendUserMessage("/skill:explore') && !indexSource.includes('pi.sendUserMessage("/skill:execute'),
   "extensions/index.ts should no longer dispatch /skill:explore or /skill:execute followUps",
 );

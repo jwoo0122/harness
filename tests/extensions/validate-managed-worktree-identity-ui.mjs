@@ -8,7 +8,7 @@ const modulePath = resolve(repoRoot, "extensions/managed-worktree-presentation.t
 const indexPath = resolve(repoRoot, "extensions/index.ts");
 const packageJsonPath = resolve(repoRoot, "package.json");
 
-assert.ok(existsSync(modulePath), "extensions/managed-worktree-presentation.ts must exist before Iteration 10 validation");
+assert.ok(existsSync(modulePath), "extensions/managed-worktree-presentation.ts must exist before managed-worktree identity UI validation");
 
 const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf-8"));
 assert.match(
@@ -50,8 +50,8 @@ assert.ok(
   "updateUI must compose managed identity into execute-mode status where applicable",
 );
 assert.ok(
-  indexSource.includes('🧠 EXPLORE'),
-  "updateUI must preserve the explore status surface while the managed widget lives separately",
+  !indexSource.includes('🧠 EXPLORE'),
+  "updateUI must not restore the removed explore status copy",
 );
 assert.ok(
   indexSource.includes('updateUI(ctx);\n\n    if (!isExploreRuntime() || !exploreChain.active) return;'),

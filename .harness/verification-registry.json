@@ -1,190 +1,236 @@
 {
-  "$schema": "harness-verification-registry-v1",
-  "entries": {
-    "AC-SMOKE-1": {
-      "requirement": "VER can register a passing AC in execute mode and persist it to the verification registry for later regression checks",
-      "source": "README.md; INTEGRATION.md",
-      "verification": {
-        "strategy": "manual-check",
-        "command": "invoke harness_verify_register and harness_verify_list in execute mode",
-        "files": [
-          "extensions/index.ts",
-          "README.md",
-          "INTEGRATION.md"
-        ],
-        "description": "Regression re-check of verification-registry plumbing after extension refactors: confirm the verify-register and verify-list tool definitions still exist in extensions/index.ts and remain documented in README.md and INTEGRATION.md. Full live execute-mode tool invocation remains a manual harness check."
-      },
-      "registeredAt": "INC-1",
-      "lastVerifiedAt": "INC-1",
-      "lastResult": "pass"
-    },
+  "$schema": "harness-verification-registry-v2",
+  "specs": {
     "AC-5.3": {
-      "requirement": "Prompt seam is extracted into a leaf module and remains validation-backed",
-      "source": ".iteration-5-criteria.md",
+      "check_id": "AC-5.3",
+      "bindings": [
+        {
+          "binding_id": "AC-5.3",
+          "requirement": "Prompt seam is extracted into a leaf module and remains validation-backed",
+          "source": ".iteration-5-criteria.md",
+          "registeredAt": "INC-7"
+        }
+      ],
       "verification": {
         "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
         "command": "npm run validate:extensions",
         "files": [
           "extensions/agent-prompts.ts",
-          "tests/extensions/validate-agent-prompts.mjs",
+          "extensions/index.ts",
           "package.json",
-          "extensions/index.ts"
+          "tests/extensions/validate-agent-prompts.mjs"
         ],
         "description": "Runs the extension validation chain, including the prompt-seam syntax and contract checks that confirm agent-prompts extraction and root wiring parity."
-      },
-      "registeredAt": "INC-7",
-      "lastVerifiedAt": "INC-7",
-      "lastResult": "pass"
+      }
     },
     "AC-6.3": {
-      "requirement": "Verification registry storage seam is extracted into a leaf module and remains validation-backed",
-      "source": ".iteration-6-criteria.md",
+      "check_id": "AC-6.3",
+      "bindings": [
+        {
+          "binding_id": "AC-6.3",
+          "requirement": "Verification registry storage seam is extracted into a leaf module and remains validation-backed",
+          "source": ".iteration-6-criteria.md",
+          "registeredAt": "INC-7"
+        }
+      ],
       "verification": {
         "strategy": "automated-test",
-        "command": "npm run validate:extensions",
-        "files": [
-          "extensions/verification-registry.ts",
-          "tests/extensions/validate-verification-registry.mjs",
-          "package.json",
-          "extensions/index.ts"
-        ],
-        "description": "Runs the extension validation chain, including registry round-trip and source-shape checks that confirm verification-registry extraction and parity."
-      },
-      "registeredAt": "INC-7",
-      "lastVerifiedAt": "INC-7",
-      "lastResult": "pass"
-    },
-    "AC-7.3": {
-      "requirement": "Bash-policy seam is extracted into a dedicated module with behavior parity validation",
-      "source": ".iteration-7-criteria.md",
-      "verification": {
-        "strategy": "automated-test",
-        "command": "npm run validate:extensions",
-        "files": [
-          "extensions/bash-policy.ts",
-          "tests/extensions/validate-bash-policy.mjs",
-          "tests/extensions/validate-verification-registry.mjs",
-          "package.json",
-          "extensions/index.ts"
-        ],
-        "description": "Runs the extension validation chain, including bash-policy behavioral parity checks, source-shape extraction checks, and forward-compatible validator-chain checks."
-      },
-      "registeredAt": "INC-7",
-      "lastVerifiedAt": "INC-7",
-      "lastResult": "pass"
-    },
-    "AC-8.1": {
-      "requirement": "No separate subagent widget/banner surface remains.",
-      "source": ".iteration-8-criteria.md",
-      "verification": {
-        "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
         "command": "npm run validate:extensions",
         "files": [
           "extensions/index.ts",
-          "tests/extensions/validate-explore-gate.mjs",
-          "package.json"
+          "extensions/verification-registry.ts",
+          "package.json",
+          "tests/extensions/validate-verification-registry.mjs"
         ],
-        "description": "Validation chain confirms updateUI only clears the harness widget, live-widget-only helpers are absent, and no separate live subagent banner surface remains."
-      },
-      "registeredAt": "INC-8",
-      "lastVerifiedAt": "INC-8",
-      "lastResult": "pass"
+        "description": "Runs the extension validation chain, including registry round-trip and source-shape checks that confirm verification-registry extraction and parity."
+      }
     },
-    "AC-8.2": {
-      "requirement": "Collapsed subagent tool rows remain per-subagent and activity-rich.",
-      "source": ".iteration-8-criteria.md",
+    "AC-7.3": {
+      "check_id": "AC-7.3",
+      "bindings": [
+        {
+          "binding_id": "AC-7.3",
+          "requirement": "Bash-policy seam is extracted into a dedicated module with behavior parity validation",
+          "source": ".iteration-7-criteria.md",
+          "registeredAt": "INC-7"
+        }
+      ],
       "verification": {
         "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
+        "command": "npm run validate:extensions",
+        "files": [
+          "extensions/bash-policy.ts",
+          "extensions/index.ts",
+          "package.json",
+          "tests/extensions/validate-bash-policy.mjs",
+          "tests/extensions/validate-verification-registry.mjs"
+        ],
+        "description": "Runs the extension validation chain, including bash-policy behavioral parity checks, source-shape extraction checks, and forward-compatible validator-chain checks."
+      }
+    },
+    "AC-8.1": {
+      "check_id": "AC-8.1",
+      "bindings": [
+        {
+          "binding_id": "AC-8.1",
+          "requirement": "No separate subagent widget/banner surface remains.",
+          "source": ".iteration-8-criteria.md",
+          "registeredAt": "INC-8"
+        }
+      ],
+      "verification": {
+        "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
+        "command": "npm run validate:extensions",
+        "files": [
+          "extensions/index.ts",
+          "package.json",
+          "tests/extensions/validate-explore-gate.mjs"
+        ],
+        "description": "Validation chain confirms updateUI only clears the harness widget, live-widget-only helpers are absent, and no separate live subagent banner surface remains."
+      }
+    },
+    "AC-8.2": {
+      "check_id": "AC-8.2",
+      "bindings": [
+        {
+          "binding_id": "AC-8.2",
+          "requirement": "Collapsed subagent tool rows remain per-subagent and activity-rich.",
+          "source": ".iteration-8-criteria.md",
+          "registeredAt": "INC-8"
+        }
+      ],
+      "verification": {
+        "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
         "command": "npm run validate:extensions",
         "files": [
           "extensions/index.ts",
           "tests/extensions/validate-explore-gate.mjs"
         ],
         "description": "Validation chain confirms explore, execute, and generic collapsed renderers still emit one row per subagent beneath the batch summary and preserve activity-rich rendering."
-      },
-      "registeredAt": "INC-8",
-      "lastVerifiedAt": "INC-8",
-      "lastResult": "pass"
+      }
     },
     "AC-8.3": {
-      "requirement": "Parent explore evidence gate is enforced pre-completion.",
-      "source": ".iteration-8-criteria.md",
+      "check_id": "AC-8.3",
+      "bindings": [
+        {
+          "binding_id": "AC-8.3",
+          "requirement": "Parent explore evidence gate is enforced pre-completion.",
+          "source": ".iteration-8-criteria.md",
+          "registeredAt": "INC-8"
+        }
+      ],
       "verification": {
         "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
         "command": "npm run validate:extensions",
         "files": [
-          "extensions/index.ts",
           "extensions/explore-gate.ts",
-          "tests/extensions/validate-explore-gate.mjs",
-          "package.json"
+          "extensions/index.ts",
+          "package.json",
+          "tests/extensions/validate-explore-gate.mjs"
         ],
         "description": "Validation chain confirms turn_end plus steer wiring, parent evidence thresholds, and removal of the old followUp-based agent_end retry as the primary explore gate."
-      },
-      "registeredAt": "INC-8",
-      "lastVerifiedAt": "INC-8",
-      "lastResult": "pass"
+      }
     },
     "AC-8.4": {
-      "requirement": "Child explore subagents get child-safe gating and prompt handling, including the generic harness_subagents explore path.",
-      "source": ".iteration-8-criteria.md",
+      "check_id": "AC-8.4",
+      "bindings": [
+        {
+          "binding_id": "AC-8.4",
+          "requirement": "Child explore subagents get child-safe gating and prompt handling, including the generic harness_subagents explore path.",
+          "source": ".iteration-8-criteria.md",
+          "registeredAt": "INC-8"
+        }
+      ],
       "verification": {
         "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
         "command": "npm run validate:extensions",
         "files": [
-          "extensions/index.ts",
           "extensions/explore-gate.ts",
+          "extensions/index.ts",
           "extensions/subagents.ts",
+          "package.json",
           "tests/extensions/validate-explore-gate.mjs",
-          "tests/extensions/validate-subagent-mode.mjs",
-          "package.json"
+          "tests/extensions/validate-subagent-mode.mjs"
         ],
         "description": "Validation chain confirms child explore mode consumption, child-safe prompt injection, no recursive harness_subagents guidance, ready-to-conclude steering, and explore-mode propagation through generic harness_subagents."
-      },
-      "registeredAt": "INC-8",
-      "lastVerifiedAt": "INC-8",
-      "lastResult": "pass"
+      }
     },
     "AC-8.5": {
-      "requirement": "Validation deterministically covers the new explore gate and generic child-mode propagation.",
-      "source": ".iteration-8-criteria.md",
+      "check_id": "AC-8.5",
+      "bindings": [
+        {
+          "binding_id": "AC-8.5",
+          "requirement": "Validation deterministically covers the new explore gate and generic child-mode propagation.",
+          "source": ".iteration-8-criteria.md",
+          "registeredAt": "INC-8"
+        }
+      ],
       "verification": {
         "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
         "command": "npm run validate:extensions",
         "files": [
-          "package.json",
           "extensions/explore-gate.ts",
+          "package.json",
           "tests/extensions/validate-explore-gate.mjs",
           "tests/extensions/validate-subagent-mode.mjs"
         ],
         "description": "Validation chain syntax-checks the new explore-gate module and executes deterministic source/behavior checks for parent and child gating plus generic explore child-mode propagation."
-      },
-      "registeredAt": "INC-8",
-      "lastVerifiedAt": "INC-8",
-      "lastResult": "pass"
+      }
     },
     "AC-9.1": {
-      "requirement": "Managed worktree identity is explicit, deterministic, and stored in repo-shared git-common-dir metadata.",
-      "source": ".iteration-9-criteria.md",
+      "check_id": "AC-9.1",
+      "bindings": [
+        {
+          "binding_id": "AC-9.1",
+          "requirement": "Managed worktree identity is explicit, deterministic, and stored in repo-shared git-common-dir metadata.",
+          "source": ".iteration-9-criteria.md",
+          "registeredAt": "INC-1"
+        }
+      ],
       "verification": {
         "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
         "command": "npm run validate:extensions",
         "files": [
-          "extensions/managed-worktrees.ts",
           "extensions/index.ts",
+          "extensions/managed-worktrees.ts",
           "package.json",
           "tests/extensions/validate-managed-worktrees.mjs"
         ],
         "description": "Validation chain syntax-checks the managed-worktrees seam and runs temp-repo assertions for deterministic managed IDs, branch prefixes, worktree roots, and git-common-dir lease paths."
-      },
-      "registeredAt": "INC-1",
-      "lastVerifiedAt": "INC-1",
-      "lastResult": "pass"
+      }
     },
     "AC-9.2": {
-      "requirement": "A non-user-facing managed-worktree creation entrypoint exists for orchestration/tests and switches into the managed workspace without exposing a public slash-command workflow.",
-      "source": ".iteration-9-criteria.md",
+      "check_id": "AC-9.2",
+      "bindings": [
+        {
+          "binding_id": "AC-9.2",
+          "requirement": "A non-user-facing managed-worktree creation entrypoint exists for orchestration/tests and switches into the managed workspace without exposing a public slash-command workflow.",
+          "source": ".iteration-9-criteria.md",
+          "registeredAt": "INC-1"
+        }
+      ],
       "verification": {
         "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
         "command": "npm run validate:extensions",
         "files": [
           "extensions/index.ts",
@@ -195,32 +241,44 @@
           "tests/extensions/validate-managed-worktree-bootstrap.mjs"
         ],
         "description": "Validation chain confirms the internal managed-worktree bootstrap command/tool wiring, keeps the workflow non-public in docs, and exercises temp-repo bootstrap behavior."
-      },
-      "registeredAt": "INC-1",
-      "lastVerifiedAt": "INC-1",
-      "lastResult": "pass"
+      }
     },
     "AC-9.3": {
-      "requirement": "Dirty-state preflight prevents silent carryover of local edits into a new managed worktree.",
-      "source": ".iteration-9-criteria.md",
+      "check_id": "AC-9.3",
+      "bindings": [
+        {
+          "binding_id": "AC-9.3",
+          "requirement": "Dirty-state preflight prevents silent carryover of local edits into a new managed worktree.",
+          "source": ".iteration-9-criteria.md",
+          "registeredAt": "INC-1"
+        }
+      ],
       "verification": {
         "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
         "command": "npm run validate:extensions",
         "files": [
           "extensions/index.ts",
           "tests/extensions/validate-managed-worktree-bootstrap.mjs"
         ],
         "description": "Validation chain confirms dirty-repo preflight messaging and the explicit HEAD-only confirmation path for managed-worktree bootstrap."
-      },
-      "registeredAt": "INC-1",
-      "lastVerifiedAt": "INC-1",
-      "lastResult": "pass"
+      }
     },
     "AC-9.4": {
-      "requirement": "Managed bootstrap creates a persisted target-cwd session file before switching and resolves relative sessionDir against the target worktree.",
-      "source": ".iteration-9-criteria.md",
+      "check_id": "AC-9.4",
+      "bindings": [
+        {
+          "binding_id": "AC-9.4",
+          "requirement": "Managed bootstrap creates a persisted target-cwd session file before switching and resolves relative sessionDir against the target worktree.",
+          "source": ".iteration-9-criteria.md",
+          "registeredAt": "INC-1"
+        }
+      ],
       "verification": {
         "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
         "command": "npm run validate:extensions",
         "files": [
           "extensions/index.ts",
@@ -228,16 +286,22 @@
           "tests/extensions/validate-managed-worktree-bootstrap.mjs"
         ],
         "description": "Validation chain confirms target session-file creation, target-cwd header persistence, absolute switch paths, and relative sessionDir resolution under the target worktree root."
-      },
-      "registeredAt": "INC-1",
-      "lastVerifiedAt": "INC-1",
-      "lastResult": "pass"
+      }
     },
     "AC-9.5": {
-      "requirement": "Session-to-worktree association survives restart and resume, and missing worktree paths fail explicitly while status surfaces the managed identity.",
-      "source": ".iteration-9-criteria.md",
+      "check_id": "AC-9.5",
+      "bindings": [
+        {
+          "binding_id": "AC-9.5",
+          "requirement": "Session-to-worktree association survives restart and resume, and missing worktree paths fail explicitly while status surfaces the managed identity.",
+          "source": ".iteration-9-criteria.md",
+          "registeredAt": "INC-1"
+        }
+      ],
       "verification": {
         "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
         "command": "npm run validate:extensions",
         "files": [
           "extensions/index.ts",
@@ -245,34 +309,46 @@
           "tests/extensions/validate-managed-worktree-lifecycle.mjs"
         ],
         "description": "Validation chain confirms binding round-trip through the session file, lease activation/release/missing transitions, and managed status surfacing in harness UI/status paths."
-      },
-      "registeredAt": "INC-1",
-      "lastVerifiedAt": "INC-1",
-      "lastResult": "pass"
+      }
     },
     "AC-9.6": {
-      "requirement": "Managed worktrees use an explicit deterministic lifecycle state model with shared lease records stored under the git common dir.",
-      "source": ".iteration-9-criteria.md",
+      "check_id": "AC-9.6",
+      "bindings": [
+        {
+          "binding_id": "AC-9.6",
+          "requirement": "Managed worktrees use an explicit deterministic lifecycle state model with shared lease records stored under the git common dir.",
+          "source": ".iteration-9-criteria.md",
+          "registeredAt": "INC-1"
+        }
+      ],
       "verification": {
         "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
         "command": "npm run validate:extensions",
         "files": [
-          "extensions/managed-worktrees.ts",
           "extensions/index.ts",
-          "tests/extensions/validate-managed-worktrees.mjs",
-          "tests/extensions/validate-managed-worktree-lifecycle.mjs"
+          "extensions/managed-worktrees.ts",
+          "tests/extensions/validate-managed-worktree-lifecycle.mjs",
+          "tests/extensions/validate-managed-worktrees.mjs"
         ],
         "description": "Validation chain confirms the managed lifecycle state model, shared lease persistence under git-common-dir storage, and deterministic activation/release/missing transitions."
-      },
-      "registeredAt": "INC-1",
-      "lastVerifiedAt": "INC-1",
-      "lastResult": "pass"
+      }
     },
     "AC-9.7": {
-      "requirement": "An authoritative mutation gate blocks harness-controlled mutation outside a valid managed-worktree binding, including execute child subagents and harness_commit.",
-      "source": ".iteration-9-criteria.md",
+      "check_id": "AC-9.7",
+      "bindings": [
+        {
+          "binding_id": "AC-9.7",
+          "requirement": "An authoritative mutation gate blocks harness-controlled mutation outside a valid managed-worktree binding, including execute child subagents and harness_commit.",
+          "source": ".iteration-9-criteria.md",
+          "registeredAt": "INC-1"
+        }
+      ],
       "verification": {
         "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
         "command": "npm run validate:extensions",
         "files": [
           "extensions/index.ts",
@@ -281,16 +357,22 @@
           "tests/extensions/validate-managed-mutation-gate.mjs"
         ],
         "description": "Validation chain confirms parent and child managed mutation gating, child env propagation, cwd/branch/lease checks, and harness_commit coverage under the same binding discipline."
-      },
-      "registeredAt": "INC-1",
-      "lastVerifiedAt": "INC-1",
-      "lastResult": "pass"
+      }
     },
     "AC-9.8": {
-      "requirement": "Inline janitor safely prunes only disposable managed worktrees and never removes non-managed worktrees.",
-      "source": ".iteration-9-criteria.md",
+      "check_id": "AC-9.8",
+      "bindings": [
+        {
+          "binding_id": "AC-9.8",
+          "requirement": "Inline janitor safely prunes only disposable managed worktrees and never removes non-managed worktrees.",
+          "source": ".iteration-9-criteria.md",
+          "registeredAt": "INC-1"
+        }
+      ],
       "verification": {
         "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
         "command": "npm run validate:extensions",
         "files": [
           "extensions/index.ts",
@@ -298,36 +380,144 @@
           "tests/extensions/validate-managed-worktree-janitor.mjs"
         ],
         "description": "Validation chain confirms janitor startup/bootstrap wiring, temp-repo worktree discovery, clean-expired-non-diverged removal rules, and protection for dirty/diverged or user-created worktrees."
-      },
-      "registeredAt": "INC-1",
-      "lastVerifiedAt": "INC-1",
-      "lastResult": "pass"
+      }
     },
     "AC-9.9": {
-      "requirement": "Validation deterministically covers the managed-worktree core, including lifecycle, bootstrap, mutation gate, janitor safety, and unchanged built-in /new behavior.",
-      "source": ".iteration-9-criteria.md",
+      "check_id": "AC-9.9",
+      "bindings": [
+        {
+          "binding_id": "AC-9.9",
+          "requirement": "Validation deterministically covers the managed-worktree core, including lifecycle, bootstrap, mutation gate, janitor safety, and unchanged built-in /new behavior.",
+          "source": ".iteration-9-criteria.md",
+          "registeredAt": "INC-1"
+        }
+      ],
       "verification": {
         "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
         "command": "npm run validate:extensions",
         "files": [
           "package.json",
-          "tests/extensions/validate-managed-worktrees.mjs",
-          "tests/extensions/validate-managed-worktree-bootstrap.mjs",
-          "tests/extensions/validate-managed-worktree-lifecycle.mjs",
           "tests/extensions/validate-managed-mutation-gate.mjs",
-          "tests/extensions/validate-managed-worktree-janitor.mjs"
+          "tests/extensions/validate-managed-worktree-bootstrap.mjs",
+          "tests/extensions/validate-managed-worktree-janitor.mjs",
+          "tests/extensions/validate-managed-worktree-lifecycle.mjs",
+          "tests/extensions/validate-managed-worktrees.mjs"
         ],
         "description": "Validation chain syntax-checks the new managed-worktrees seam and runs deterministic validators covering bootstrap, lifecycle, mutation gate, janitor safety, and public-surface constraints for Iteration 9."
-      },
-      "registeredAt": "INC-1",
-      "lastVerifiedAt": "INC-1",
-      "lastResult": "pass"
+      }
     },
-    "AC-10.1": {
-      "requirement": "Managed-worktree presentation state is explicit and testable",
-      "source": ".iteration-10-criteria.md",
+    "AC-SMOKE-1": {
+      "check_id": "AC-SMOKE-1",
+      "bindings": [
+        {
+          "binding_id": "AC-SMOKE-1",
+          "requirement": "VER can register a passing AC in execute mode and persist it to the verification registry for later regression checks",
+          "source": "README.md; INTEGRATION.md",
+          "registeredAt": "INC-1"
+        }
+      ],
+      "verification": {
+        "strategy": "manual-check",
+        "mode": "manual",
+        "blocking": false,
+        "command": "invoke harness_verify_register and harness_verify_list in execute mode",
+        "files": [
+          "extensions/index.ts",
+          "INTEGRATION.md",
+          "README.md"
+        ],
+        "description": "Regression re-check of verification-registry plumbing after extension refactors: confirm the verify-register and verify-list tool definitions still exist in extensions/index.ts and remain documented in README.md and INTEGRATION.md. Full live execute-mode tool invocation remains a manual harness check."
+      }
+    },
+    "validate-iteration-10-verification-accumulation": {
+      "check_id": "validate-iteration-10-verification-accumulation",
+      "bindings": [
+        {
+          "binding_id": "AC-10.1",
+          "requirement": "Committed registry becomes a reusable spec catalog",
+          "source": ".iteration-10-criteria.md",
+          "registeredAt": "INC-1"
+        },
+        {
+          "binding_id": "AC-10.2",
+          "requirement": "Legacy v1 data migrates without importing old pass/fail truth",
+          "source": ".iteration-10-criteria.md",
+          "registeredAt": "INC-1"
+        },
+        {
+          "binding_id": "AC-10.3",
+          "requirement": "Runtime receipts are repo-shared and append-only",
+          "source": ".iteration-10-criteria.md",
+          "registeredAt": "INC-1"
+        },
+        {
+          "binding_id": "AC-10.4",
+          "requirement": "Runtime corruption fails explicitly",
+          "source": ".iteration-10-criteria.md",
+          "registeredAt": "INC-1"
+        },
+        {
+          "binding_id": "AC-10.5",
+          "requirement": "Registering a spec must not claim a pass",
+          "source": ".iteration-10-criteria.md",
+          "registeredAt": "INC-1"
+        },
+        {
+          "binding_id": "AC-10.6",
+          "requirement": "Executed evidence gets an authoritative tool surface",
+          "source": ".iteration-10-criteria.md",
+          "registeredAt": "INC-1"
+        },
+        {
+          "binding_id": "AC-10.7",
+          "requirement": "Listing/status becomes receipt-driven and freshness-aware",
+          "source": ".iteration-10-criteria.md",
+          "registeredAt": "INC-1"
+        },
+        {
+          "binding_id": "AC-10.8",
+          "requirement": "Deterministic validation covers migration, sharing, and corruption behavior",
+          "source": ".iteration-10-criteria.md",
+          "registeredAt": "INC-1"
+        }
+      ],
       "verification": {
         "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
+        "command": "npm run validate:extensions",
+        "files": [
+          ".harness/verification-registry.json",
+          ".iteration-10-criteria.md",
+          "agents/VER.md",
+          "CHANGELOG.md",
+          "extensions/index.ts",
+          "extensions/verification-registry.ts",
+          "INTEGRATION.md",
+          "prompts/ac-check.md",
+          "README.md",
+          "skills/execute/SKILL.md",
+          "tests/extensions/validate-verification-registry.mjs"
+        ],
+        "description": "Aggregate validation and source-backed checks for iteration 10 verification accumulation: v2 committed specs, legacy migration, repo-shared append-only receipts, explicit runtime corruption failure, register/run/list tool wiring, and receipt-derived status behavior."
+      }
+    },
+    "AC-11.1": {
+      "check_id": "AC-11.1",
+      "bindings": [
+        {
+          "binding_id": "AC-11.1",
+          "requirement": "Managed-worktree presentation state is explicit and testable",
+          "source": "target/execute/iteration-11-managed-worktree-identity-ui-20260420-143504.md",
+          "registeredAt": "INC-1"
+        }
+      ],
+      "verification": {
+        "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
         "command": "npm run validate:extensions",
         "files": [
           "extensions/managed-worktree-presentation.ts",
@@ -335,17 +525,23 @@
           "tests/extensions/validate-managed-worktree-identity-ui.mjs",
           "package.json"
         ],
-        "description": "Runs the extension validation chain, including the new deterministic managed-worktree presentation seam validator that imports the helper directly and checks explicit unmanaged/healthy/degraded state derivation plus root wiring."
-      },
-      "registeredAt": "INC-1",
-      "lastVerifiedAt": "INC-1",
-      "lastResult": "pass"
+        "description": "Runs the extension validation chain, including the managed-worktree presentation seam validator that imports the helper directly and checks explicit unmanaged/healthy/degraded state derivation plus root wiring."
+      }
     },
-    "AC-10.2": {
-      "requirement": "Always-on below-editor widget is the primary managed-worktree identity surface",
-      "source": ".iteration-10-criteria.md",
+    "AC-11.2": {
+      "check_id": "AC-11.2",
+      "bindings": [
+        {
+          "binding_id": "AC-11.2",
+          "requirement": "Always-on below-editor widget is the primary managed-worktree identity surface",
+          "source": "target/execute/iteration-11-managed-worktree-identity-ui-20260420-143504.md",
+          "registeredAt": "INC-1"
+        }
+      ],
       "verification": {
         "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
         "command": "npm run validate:extensions",
         "files": [
           "extensions/index.ts",
@@ -353,32 +549,44 @@
           "tests/extensions/validate-explore-gate.mjs"
         ],
         "description": "Runs the validation chain, including source checks that the managed widget renders below the editor via setWidget(..., { placement: \"belowEditor\" }) and remains scoped to the managed harness surface rather than the removed live protocol widget."
-      },
-      "registeredAt": "INC-1",
-      "lastVerifiedAt": "INC-1",
-      "lastResult": "pass"
+      }
     },
-    "AC-10.3": {
-      "requirement": "Widget copy is identity-first and location-aware",
-      "source": ".iteration-10-criteria.md",
+    "AC-11.3": {
+      "check_id": "AC-11.3",
+      "bindings": [
+        {
+          "binding_id": "AC-11.3",
+          "requirement": "Widget copy is identity-first and location-aware",
+          "source": "target/execute/iteration-11-managed-worktree-identity-ui-20260420-143504.md",
+          "registeredAt": "INC-1"
+        }
+      ],
       "verification": {
         "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
         "command": "npm run validate:extensions",
         "files": [
           "extensions/managed-worktree-presentation.ts",
           "tests/extensions/validate-managed-worktree-identity-ui.mjs"
         ],
         "description": "Runs the validation chain, including deterministic healthy-state cases for managed root, target entry cwd, and nested subdirectories to verify the widget/status include both managed identity and readable relative location without defaulting to absolute paths or full branch names."
-      },
-      "registeredAt": "INC-1",
-      "lastVerifiedAt": "INC-1",
-      "lastResult": "pass"
+      }
     },
-    "AC-10.4": {
-      "requirement": "Degraded managed states escalate in the same widget surface",
-      "source": ".iteration-10-criteria.md",
+    "AC-11.4": {
+      "check_id": "AC-11.4",
+      "bindings": [
+        {
+          "binding_id": "AC-11.4",
+          "requirement": "Degraded managed states escalate in the same widget surface",
+          "source": "target/execute/iteration-11-managed-worktree-identity-ui-20260420-143504.md",
+          "registeredAt": "INC-1"
+        }
+      ],
       "verification": {
         "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
         "command": "npm run validate:extensions",
         "files": [
           "extensions/managed-worktree-presentation.ts",
@@ -386,33 +594,45 @@
           "extensions/index.ts"
         ],
         "description": "Runs the validation chain, including deterministic degraded-state cases for provisioning, managed-released, managed-missing, manual-cleanup-required, missing lease, missing path, and cwd outside the bound target, proving the same widget surface escalates copy and blocked messaging."
-      },
-      "registeredAt": "INC-1",
-      "lastVerifiedAt": "INC-1",
-      "lastResult": "pass"
+      }
     },
-    "AC-10.5": {
-      "requirement": "Compact footer/status fallback remains, but built-in footer ownership stays with pi",
-      "source": ".iteration-10-criteria.md",
+    "AC-11.5": {
+      "check_id": "AC-11.5",
+      "bindings": [
+        {
+          "binding_id": "AC-11.5",
+          "requirement": "Compact footer/status fallback remains, but built-in footer ownership stays with pi",
+          "source": "target/execute/iteration-11-managed-worktree-identity-ui-20260420-143504.md",
+          "registeredAt": "INC-1"
+        }
+      ],
       "verification": {
         "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
         "command": "npm run validate:extensions",
         "files": [
           "extensions/index.ts",
           "tests/extensions/validate-managed-worktree-identity-ui.mjs",
           "tests/extensions/validate-managed-worktree-lifecycle.mjs"
         ],
-        "description": "Runs the validation chain, including source checks that setStatus() still carries compact managed identity in idle and execute/explore compositions while setFooter() is not used for this feature and lifecycle status markers remain present."
-      },
-      "registeredAt": "INC-1",
-      "lastVerifiedAt": "INC-1",
-      "lastResult": "pass"
+        "description": "Runs the validation chain, including source checks that setStatus() still carries compact managed identity in idle and execute compositions while setFooter() is not used for this feature and lifecycle status markers remain present."
+      }
     },
-    "AC-10.6": {
-      "requirement": "Managed-worktree identity UI honors current cwd changes within the managed workspace",
-      "source": ".iteration-10-criteria.md",
+    "AC-11.6": {
+      "check_id": "AC-11.6",
+      "bindings": [
+        {
+          "binding_id": "AC-11.6",
+          "requirement": "Managed-worktree identity UI honors current cwd changes within the managed workspace",
+          "source": "target/execute/iteration-11-managed-worktree-identity-ui-20260420-143504.md",
+          "registeredAt": "INC-1"
+        }
+      ],
       "verification": {
         "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
         "command": "npm run validate:extensions",
         "files": [
           "extensions/index.ts",
@@ -421,16 +641,22 @@
           "tests/extensions/validate-managed-worktree-lifecycle.mjs"
         ],
         "description": "Runs the validation chain, including deterministic root/entry/nested/outside-target cwd cases and source checks that turn_end refreshes the managed UI from current session cwd rather than freezing the original entry cwd."
-      },
-      "registeredAt": "INC-1",
-      "lastVerifiedAt": "INC-1",
-      "lastResult": "pass"
+      }
     },
-    "AC-10.7": {
-      "requirement": "RPC parity uses text-first status/widget rendering",
-      "source": ".iteration-10-criteria.md",
+    "AC-11.7": {
+      "check_id": "AC-11.7",
+      "bindings": [
+        {
+          "binding_id": "AC-11.7",
+          "requirement": "RPC parity uses text-first status/widget rendering",
+          "source": "target/execute/iteration-11-managed-worktree-identity-ui-20260420-143504.md",
+          "registeredAt": "INC-1"
+        }
+      ],
       "verification": {
         "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
         "command": "npm run validate:extensions",
         "files": [
           "extensions/managed-worktree-presentation.ts",
@@ -438,16 +664,22 @@
           "tests/extensions/validate-managed-worktree-identity-ui.mjs"
         ],
         "description": "Runs the validation chain, including assertions that the managed widget renderer returns plain string arrays and that the compact status remains on the normal status API, preserving the core identity/degraded signal in RPC-compatible text surfaces."
-      },
-      "registeredAt": "INC-1",
-      "lastVerifiedAt": "INC-1",
-      "lastResult": "pass"
+      }
     },
-    "AC-10.8": {
-      "requirement": "Validation covers managed-worktree identity UI policy deterministically",
-      "source": ".iteration-10-criteria.md",
+    "AC-11.8": {
+      "check_id": "AC-11.8",
+      "bindings": [
+        {
+          "binding_id": "AC-11.8",
+          "requirement": "Validation covers managed-worktree identity UI policy deterministically",
+          "source": "target/execute/iteration-11-managed-worktree-identity-ui-20260420-143504.md",
+          "registeredAt": "INC-1"
+        }
+      ],
       "verification": {
         "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
         "command": "npm run validate:extensions",
         "files": [
           "package.json",
@@ -457,10 +689,7 @@
           "tests/extensions/validate-managed-worktree-lifecycle.mjs"
         ],
         "description": "Runs the validation chain after package.json wiring updates, confirming the new presentation seam, below-editor widget path, managed-only scope, compact status fallback, no footer takeover, healthy/degraded distinction, cwd-sensitive refresh, and RPC-compatible text rendering are all covered deterministically."
-      },
-      "registeredAt": "INC-1",
-      "lastVerifiedAt": "INC-1",
-      "lastResult": "pass"
+      }
     }
   }
 }
