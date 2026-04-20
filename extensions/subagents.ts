@@ -5,7 +5,7 @@ import { basename } from "node:path";
 export type HarnessMode = "generic" | "explore" | "execute";
 export type SubagentBashPolicy = "none" | "read-only" | "verify" | "implement";
 export type SubagentBatchMode = "parallel" | "sequential";
-export type HarnessSubagentLivePhase = "starting" | "running" | "tool_running" | "completed" | "failed";
+export type HarnessSubagentLivePhase = "queued" | "starting" | "running" | "tool_running" | "completed" | "failed";
 
 export function resolveGenericSubagentChildMode(parentMode: HarnessMode | "off"): HarnessMode {
   return parentMode === "explore" ? "explore" : "generic";
@@ -27,7 +27,8 @@ export interface HarnessSubagentProvenance {
 
 export interface HarnessSubagentRecentStreamItem {
   at: string;
-  type: "assistant_text" | "tool_execution_start" | "tool_execution_end";
+  type: "assistant_text" | "tool_execution_start" | "tool_execution_update" | "tool_execution_end";
+  toolCallId?: string;
   toolName?: string;
   text?: string;
   isError?: boolean;
@@ -36,8 +37,11 @@ export interface HarnessSubagentRecentStreamItem {
 export interface HarnessSubagentSnapshot<TRole extends string = string> {
   mode: HarnessMode;
   role: TRole;
+  instanceId: string;
+  declaredIndex: number;
   label: string;
   livePhase: HarnessSubagentLivePhase;
+  currentToolCallId?: string;
   currentToolName?: string;
   assistantPreview: string;
   recentStream: HarnessSubagentRecentStreamItem[];
@@ -48,6 +52,8 @@ export interface HarnessSubagentSnapshot<TRole extends string = string> {
 export interface HarnessSubagentSpec<TRole extends string = string> {
   mode: HarnessMode;
   role: TRole;
+  instanceId: string;
+  declaredIndex: number;
   label: string;
   task: string;
   systemPrompt: string;
@@ -208,6 +214,27 @@ function cloneSnapshot<TRole extends string>(snapshot: HarnessSubagentSnapshot<T
   };
 }
 
+function buildQueuedSubagentSnapshot<TRole extends string>(
+  spec: HarnessSubagentSpec<TRole>,
+): HarnessSubagentSnapshot<TRole> {
+  return {
+    mode: spec.mode,
+    role: spec.role,
+    instanceId: spec.instanceId,
+    declaredIndex: spec.declaredIndex,
+    label: spec.label,
+    livePhase: "queued",
+    assistantPreview: "",
+    recentStream: [],
+    model: spec.modelSpec,
+    provenance: {
+      command: "",
+      args: [],
+      cwd: spec.cwd,
+    },
+  };
+}
+
 function summarizeTextFragment(text: string, maxChars = MAX_STREAM_ITEM_TEXT_CHARS): string {
   const normalized = text.replace(/\s+/g, " ").trim();
   if (!normalized) return "";
@@ -232,10 +259,48 @@ function summarizeToolArgs(toolName: string, args: any): string | undefined {
   }
 }
 
-function lastMapValue<TKey>(map: Map<TKey, string>): string | undefined {
-  let value: string | undefined;
-  for (const current of map.values()) value = current;
-  return value;
+function summarizeRecentTextFragment(text: string, maxChars = MAX_STREAM_ITEM_TEXT_CHARS): string {
+  const lines = text
+    .split(/\r?\n/g)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const latestLine = lines.length > 0 ? lines[lines.length - 1] : text;
+  const normalized = latestLine.replace(/\s+/g, " ").trim();
+  if (!normalized) return "";
+  if (normalized.length <= maxChars) return normalized;
+  return `…${normalized.slice(-(maxChars - 1))}`;
+}
+
+function summarizeToolResult(result: any): string | undefined {
+  const text = (result?.content ?? [])
+    .filter((item: any) => item?.type === "text" && typeof item.text === "string")
+    .map((item: any) => item.text)
+    .join("\n")
+    .trim();
+  if (text) return summarizeRecentTextFragment(text);
+
+  if (typeof result?.details?.finalUrl === "string") {
+    return summarizeTextFragment(result.details.finalUrl);
+  }
+
+  if (typeof result?.details?.status === "number") {
+    return `status ${result.details.status}`;
+  }
+
+  try {
+    const serialized = JSON.stringify(result?.details);
+    return serialized ? summarizeTextFragment(serialized) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function lastMapEntry<TKey>(map: Map<TKey, string>): { key: TKey; value: string } | undefined {
+  let entry: { key: TKey; value: string } | undefined;
+  for (const [key, value] of map.entries()) {
+    entry = { key, value };
+  }
+  return entry;
 }
 
 function pushRecentStream<TRole extends string>(
@@ -269,6 +334,8 @@ export async function runHarnessSubagentProcess<TRole extends string>(
   const snapshot: HarnessSubagentSnapshot<TRole> = {
     mode: spec.mode,
     role: spec.role,
+    instanceId: spec.instanceId,
+    declaredIndex: spec.declaredIndex,
     label: spec.label,
     livePhase: "starting",
     assistantPreview: "",
@@ -289,7 +356,9 @@ export async function runHarnessSubagentProcess<TRole extends string>(
 
   const emitSnapshot = () => options.onSnapshot?.(cloneSnapshot(snapshot));
   const refreshLiveState = () => {
-    snapshot.currentToolName = lastMapValue(inFlightTools);
+    const currentTool = lastMapEntry(inFlightTools);
+    snapshot.currentToolCallId = typeof currentTool?.key === "string" ? currentTool.key : undefined;
+    snapshot.currentToolName = currentTool?.value;
     if (snapshot.livePhase === "completed" || snapshot.livePhase === "failed") return;
     snapshot.livePhase = snapshot.currentToolName ? "tool_running" : "running";
   };
@@ -353,6 +422,7 @@ export async function runHarnessSubagentProcess<TRole extends string>(
       snapshot.model = model;
       snapshot.provenance.endedAt = new Date().toISOString();
       inFlightTools.clear();
+      snapshot.currentToolCallId = undefined;
       snapshot.currentToolName = undefined;
       snapshot.livePhase = code === 0 ? "completed" : "failed";
       emitSnapshot();
@@ -384,11 +454,13 @@ export async function runHarnessSubagentProcess<TRole extends string>(
       }
 
       if (event.type === "tool_execution_start" && typeof event.toolName === "string") {
-        inFlightTools.set(String(event.toolCallId ?? `${event.toolName}:${Date.now()}`), event.toolName);
+        const toolCallId = String(event.toolCallId ?? `${event.toolName}:${Date.now()}`);
+        inFlightTools.set(toolCallId, event.toolName);
         refreshLiveState();
         pushRecentStream(snapshot, {
           at: new Date().toISOString(),
           type: "tool_execution_start",
+          toolCallId,
           toolName: event.toolName,
           text: summarizeToolArgs(event.toolName, event.args),
         });
@@ -396,13 +468,29 @@ export async function runHarnessSubagentProcess<TRole extends string>(
         return;
       }
 
+      if (event.type === "tool_execution_update" && typeof event.toolName === "string") {
+        refreshLiveState();
+        pushRecentStream(snapshot, {
+          at: new Date().toISOString(),
+          type: "tool_execution_update",
+          toolCallId: typeof event.toolCallId === "string" ? event.toolCallId : undefined,
+          toolName: event.toolName,
+          text: summarizeToolResult(event.partialResult),
+        });
+        emitSnapshot();
+        return;
+      }
+
       if (event.type === "tool_execution_end" && typeof event.toolName === "string") {
-        inFlightTools.delete(String(event.toolCallId ?? ""));
+        const toolCallId = String(event.toolCallId ?? "");
+        inFlightTools.delete(toolCallId);
         refreshLiveState();
         pushRecentStream(snapshot, {
           at: new Date().toISOString(),
           type: "tool_execution_end",
+          toolCallId: toolCallId || undefined,
           toolName: event.toolName,
+          text: summarizeToolResult(event.result),
           isError: Boolean(event.isError),
         });
         emitSnapshot();
@@ -497,6 +585,8 @@ export async function runHarnessSubagentProcess<TRole extends string>(
   return {
     mode: spec.mode,
     role: spec.role,
+    instanceId: spec.instanceId,
+    declaredIndex: spec.declaredIndex,
     label: spec.label,
     task: spec.task,
     output,
@@ -506,6 +596,7 @@ export async function runHarnessSubagentProcess<TRole extends string>(
     stderr,
     model,
     livePhase: exitCode === 0 ? "completed" : "failed",
+    currentToolCallId: undefined,
     currentToolName: undefined,
     assistantPreview: snapshot.assistantPreview,
     recentStream: cloneRecentStream(snapshot.recentStream),
@@ -521,12 +612,10 @@ export async function runHarnessSubagentBatch<TRole extends string>(
   options: HarnessSubagentBatchOptions<TRole>,
 ): Promise<HarnessSubagentRunResult<TRole>[]> {
   const resultSlots: Array<HarnessSubagentRunResult<TRole> | undefined> = new Array(specs.length).fill(undefined);
-  const snapshotSlots: Array<HarnessSubagentSnapshot<TRole> | undefined> = new Array(specs.length).fill(undefined);
+  const snapshotSlots: HarnessSubagentSnapshot<TRole>[] = specs.map((spec) => buildQueuedSubagentSnapshot(spec));
 
   const getResults = () => resultSlots.filter((result): result is HarnessSubagentRunResult<TRole> => Boolean(result));
-  const getSnapshots = () => snapshotSlots
-    .filter((snapshot): snapshot is HarnessSubagentSnapshot<TRole> => Boolean(snapshot))
-    .map((snapshot) => cloneSnapshot(snapshot));
+  const getSnapshots = () => snapshotSlots.map((snapshot) => cloneSnapshot(snapshot));
   const emitProgress = () => {
     const results = getResults();
     options.onProgress?.(results, results.length, specs.length, getSnapshots());

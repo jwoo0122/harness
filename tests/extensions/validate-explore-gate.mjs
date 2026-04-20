@@ -76,9 +76,9 @@ for (const removedMarker of [
   assert.ok(!indexSource.includes(removedMarker), `extensions/index.ts must no longer contain ${removedMarker}`);
 }
 for (const perSubagentMarker of [
-  'lines.push(renderCollapsedSubagentLine(`${role.icon} ${role.persona}`, snapshot, result, theme));',
-  'lines.push(renderCollapsedSubagentLine(`${spec.icon} ${role}`, snapshot, result, theme));',
-  'lines.push(renderCollapsedSubagentLine(label, snapshot, result, theme));',
+  'lines.push(renderCollapsedSubagentLine(`${role.icon} ${role.persona}`, snapshot, result, theme, activeSpinnerFrame));',
+  'lines.push(renderCollapsedSubagentLine(`${spec.icon} ${role}`, snapshot, result, theme, activeSpinnerFrame));',
+  'lines.push(renderCollapsedSubagentLine(label, snapshot, result, theme, activeSpinnerFrame));',
 ]) {
   assert.ok(indexSource.includes(perSubagentMarker), `collapsed subagent rows must remain per-subagent: ${perSubagentMarker}`);
 }

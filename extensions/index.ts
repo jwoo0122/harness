@@ -234,6 +234,8 @@ interface HarnessSubagentConfigInput {
 
 interface HarnessSubagentDefinition {
   role: string;
+  instanceId: string;
+  declaredIndex: number;
   label: string;
   icon?: string;
   task: string;
@@ -253,7 +255,7 @@ interface HarnessSubagentsToolDetails {
   mode: "parallel" | "sequential";
   completed: number;
   total: number;
-  subagents: Array<Pick<HarnessSubagentDefinition, "role" | "label" | "icon">>;
+  subagents: Array<Pick<HarnessSubagentDefinition, "role" | "instanceId" | "declaredIndex" | "label" | "icon">>;
   results: HarnessSubagentsResult[];
   snapshots: HarnessSubagentSnapshot<string>[];
   record?: PersistedSubagentBatchRecordLink;
@@ -339,6 +341,8 @@ const MAX_SUBAGENT_CITATIONS_RENDER = 4;
 const HARNESS_SUBAGENT_RECORD_TYPE = "harness-subagent-record";
 const MAX_SUBAGENT_RECORD_OUTPUT_PREVIEW_CHARS = 200;
 const MAX_SUBAGENT_RECORD_STDERR_PREVIEW_CHARS = 160;
+const SUBAGENT_SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const SUBAGENT_SPINNER_INTERVAL_MS = 80;
 
 interface ExploreSubagentRoleDefinition {
   persona: ExplorePersona;
@@ -527,9 +531,9 @@ function formatExploreSubagentResults(details: ExploreSubagentToolDetails): stri
     if (result.citations.length > 0) lines.push(`Citations: ${result.citations.join(", ")}`);
     lines.push("");
     lines.push(result.output || "[No assistant output captured]");
-    if (result.stderr.trim()) {
+    if (getSubagentResultStderr(result).trim()) {
       lines.push("");
-      lines.push(`stderr: ${result.stderr.trim()}`);
+      lines.push(`stderr: ${getSubagentResultStderr(result).trim()}`);
     }
     lines.push("");
   }
@@ -586,7 +590,7 @@ function normalizeHarnessSubagentDefinitions(
   subagents: HarnessSubagentConfigInput[],
   context?: string,
 ): HarnessSubagentDefinition[] {
-  return subagents.flatMap((subagent) => {
+  return subagents.flatMap((subagent, declaredIndex) => {
     const role = subagent.role.trim();
     const systemPromptBody = subagent.system_prompt.trim();
     if (!role || !systemPromptBody) return [];
@@ -599,6 +603,8 @@ function normalizeHarnessSubagentDefinitions(
 
     return [{
       role,
+      instanceId: `subagent:${declaredIndex}`,
+      declaredIndex,
       label,
       icon,
       task: buildHarnessSubagentTask(subject, subagent, context),
@@ -628,7 +634,7 @@ function mapHarnessSubagentsRunResult(
 function buildHarnessSubagentsDetails(
   subject: string,
   mode: "parallel" | "sequential",
-  subagents: Array<Pick<HarnessSubagentDefinition, "role" | "label" | "icon">>,
+  subagents: Array<Pick<HarnessSubagentDefinition, "role" | "instanceId" | "declaredIndex" | "label" | "icon">>,
   completed: number,
   total: number,
   results: HarnessSubagentRunResult<string>[],
@@ -662,7 +668,7 @@ function formatHarnessSubagentsResults(details: HarnessSubagentsToolDetails): st
   lines.push("");
 
   for (const subagent of details.subagents) {
-    const result = details.results.find((entry) => entry.role === subagent.role);
+    const result = details.results.find((entry) => entry.instanceId === subagent.instanceId);
     lines.push(`## ${subagent.label}${subagent.label !== subagent.role ? ` (${subagent.role})` : ""}`);
     if (!result) {
       lines.push("[No assistant output captured]");
@@ -679,9 +685,9 @@ function formatHarnessSubagentsResults(details: HarnessSubagentsToolDetails): st
     if (result.citations.length > 0) lines.push(`Citations: ${result.citations.join(", ")}`);
     lines.push("");
     lines.push(result.output || "[No assistant output captured]");
-    if (result.stderr.trim()) {
+    if (getSubagentResultStderr(result).trim()) {
       lines.push("");
-      lines.push(`stderr: ${result.stderr.trim()}`);
+      lines.push(`stderr: ${getSubagentResultStderr(result).trim()}`);
     }
     lines.push("");
   }
@@ -754,6 +760,169 @@ function summarizeExecuteSubagentProgress(details: ExecuteSubagentToolDetails): 
   return `Running execute subagents for \"${details.objective}\" — ${details.completed}/${details.total} complete (${completedLabels})`;
 }
 
+function formatCollapsedBatchStatusText(completed: number, total: number, failures: number): string {
+  if (completed >= total) {
+    return failures > 0 ? `${completed}/${total} done · ${failures} failed` : `${completed}/${total} done`;
+  }
+  return `${completed}/${total} running`;
+}
+
+function joinCollapsedSummaryParts(parts: Array<string | undefined>): string {
+  return parts.filter(Boolean).join(" · ");
+}
+
+function formatExploreSubagentLivePartialText(
+  details: ExploreSubagentToolDetails,
+  spinnerFrame: string = SUBAGENT_SPINNER_FRAMES[0]!,
+): string {
+  const totalSearches = details.results.reduce((sum, result) => sum + result.searches, 0);
+  const totalFetches = details.results.reduce((sum, result) => sum + result.fetches, 0);
+  const totalUrls = uniqueUrls(details.results.flatMap((result) => result.citations)).length;
+  const failures = details.results.filter((result) => result.exitCode !== 0).length;
+  const lines = [joinCollapsedSummaryParts([
+    formatCollapsedBatchStatusText(details.completed, details.total, failures),
+    totalSearches > 0 ? `🔎 ${totalSearches}` : undefined,
+    totalFetches > 0 ? `🌐 ${totalFetches}` : undefined,
+    totalUrls > 0 ? `🔗 ${totalUrls}` : undefined,
+  ])];
+
+  for (const role of EXPLORE_SUBAGENT_ROLES) {
+    const result = details.results.find((entry) => entry.persona === role.persona);
+    const snapshot = details.snapshots.find((entry) => entry.role === role.persona);
+    lines.push(formatCollapsedSubagentLineText(`${role.icon} ${role.persona}`, snapshot, result, spinnerFrame));
+  }
+
+  return lines.join("\n");
+}
+
+function formatExecuteSubagentLivePartialText(
+  details: ExecuteSubagentToolDetails,
+  spinnerFrame: string = SUBAGENT_SPINNER_FRAMES[0]!,
+): string {
+  const failures = details.results.filter((result) => result.exitCode !== 0).length;
+  const toolSummary = formatSubagentToolCounts(
+    details.results.reduce<Record<string, number>>((acc, result) => {
+      for (const [tool, count] of Object.entries(result.toolCalls)) {
+        acc[tool] = (acc[tool] ?? 0) + count;
+      }
+      return acc;
+    }, {}),
+    3,
+  );
+  const lines = [joinCollapsedSummaryParts([
+    formatCollapsedBatchStatusText(details.completed, details.total, failures),
+    toolSummary || undefined,
+  ])];
+
+  for (const role of details.roles) {
+    const snapshot = details.snapshots.find((entry) => entry.role === role);
+    const result = details.results.find((entry) => entry.role === role);
+    const spec = resolveExecuteRole(role);
+    lines.push(formatCollapsedSubagentLineText(`${spec.icon} ${role}`, snapshot, result, spinnerFrame));
+  }
+
+  return lines.join("\n");
+}
+
+function formatHarnessSubagentsLivePartialText(
+  details: HarnessSubagentsToolDetails,
+  spinnerFrame: string = SUBAGENT_SPINNER_FRAMES[0]!,
+): string {
+  const failures = details.results.filter((result) => result.exitCode !== 0).length;
+  const totalSearches = details.results.reduce((sum, result) => sum + result.searches, 0);
+  const totalFetches = details.results.reduce((sum, result) => sum + result.fetches, 0);
+  const totalUrls = uniqueUrls(details.results.flatMap((result) => result.citations)).length;
+  const toolSummary = formatSubagentToolCounts(
+    details.results.reduce<Record<string, number>>((acc, result) => {
+      for (const [tool, count] of Object.entries(result.toolCalls)) {
+        acc[tool] = (acc[tool] ?? 0) + count;
+      }
+      return acc;
+    }, {}),
+    3,
+  );
+  const lines = [joinCollapsedSummaryParts([
+    formatCollapsedBatchStatusText(details.completed, details.total, failures),
+    totalSearches > 0 ? `🔎 ${totalSearches}` : undefined,
+    totalFetches > 0 ? `🌐 ${totalFetches}` : undefined,
+    totalUrls > 0 ? `🔗 ${totalUrls}` : undefined,
+    toolSummary || undefined,
+  ])];
+
+  for (const subagent of details.subagents) {
+    const result = details.results.find((entry) => entry.instanceId === subagent.instanceId);
+    const snapshot = details.snapshots.find((entry) => entry.instanceId === subagent.instanceId);
+    const label = subagent.icon ? `${subagent.icon} ${subagent.label}` : subagent.label;
+    lines.push(formatCollapsedSubagentLineText(label, snapshot, result, spinnerFrame));
+  }
+
+  return lines.join("\n");
+}
+
+function createLiveSubagentPartialEmitter<TDetails>(params: {
+  onUpdate?: ((payload: { content: Array<{ type: "text"; text: string }>; details: TDetails }) => void) | undefined;
+  isActive: (details: TDetails) => boolean;
+  renderText: (details: TDetails, spinnerFrame: string) => string;
+}): { update: (details: TDetails) => void; stop: () => void } {
+  let latestDetails: TDetails | undefined;
+  let timer: ReturnType<typeof setInterval> | undefined;
+  let frameIndex = 0;
+
+  const stop = () => {
+    if (timer) {
+      clearInterval(timer);
+      timer = undefined;
+    }
+  };
+
+  const emit = () => {
+    if (!latestDetails || !params.onUpdate) return;
+    const active = params.isActive(latestDetails);
+    const spinnerFrame = active
+      ? SUBAGENT_SPINNER_FRAMES[frameIndex % SUBAGENT_SPINNER_FRAMES.length]!
+      : SUBAGENT_SPINNER_FRAMES[0]!;
+    let text: string;
+    try {
+      text = params.renderText(latestDetails, spinnerFrame);
+    } catch (error) {
+      text = error instanceof Error ? `[live subagent update unavailable: ${error.message}]` : "[live subagent update unavailable]";
+    }
+    params.onUpdate({
+      content: [{ type: "text", text }],
+      details: latestDetails,
+    });
+  };
+
+  const syncTimer = () => {
+    if (!latestDetails || !params.onUpdate) {
+      stop();
+      return;
+    }
+
+    if (!params.isActive(latestDetails)) {
+      stop();
+      return;
+    }
+
+    if (timer) return;
+    timer = setInterval(() => {
+      frameIndex = (frameIndex + 1) % SUBAGENT_SPINNER_FRAMES.length;
+      emit();
+    }, SUBAGENT_SPINNER_INTERVAL_MS);
+  };
+
+  return {
+    update(details: TDetails) {
+      latestDetails = details;
+      syncTimer();
+      emit();
+    },
+    stop() {
+      stop();
+    },
+  };
+}
+
 function formatExecuteSubagentResults(details: ExecuteSubagentToolDetails): string {
   const lines: string[] = [];
   lines.push(`Execute subagents completed for: ${details.objective}`);
@@ -770,9 +939,9 @@ function formatExecuteSubagentResults(details: ExecuteSubagentToolDetails): stri
     if (result.model) lines.push(`Model: ${result.model}`);
     lines.push("");
     lines.push(result.output || "[No assistant output captured]");
-    if (result.stderr.trim()) {
+    if (getSubagentResultStderr(result).trim()) {
       lines.push("");
-      lines.push(`stderr: ${result.stderr.trim()}`);
+      lines.push(`stderr: ${getSubagentResultStderr(result).trim()}`);
     }
     lines.push("");
   }
@@ -822,6 +991,9 @@ interface StableTextLine {
 
 class StableTextLineList extends Container {
   private readonly lineComponents = new Map<string, Text>();
+  private animationTimer: ReturnType<typeof setInterval> | undefined;
+  private animationFrameIndex = 0;
+  private animationInvalidate: (() => void) | undefined;
 
   setLines(lines: StableTextLine[]): void {
     const nextIds = new Set(lines.map((line) => line.id));
@@ -840,21 +1012,57 @@ class StableTextLineList extends Container {
       this.addChild(component);
     }
   }
+
+  setAnimation(active: boolean, invalidate?: () => void): void {
+    this.animationInvalidate = invalidate;
+
+    if (!active) {
+      if (this.animationTimer) {
+        clearInterval(this.animationTimer);
+        this.animationTimer = undefined;
+      }
+      this.animationFrameIndex = 0;
+      return;
+    }
+
+    if (this.animationTimer || !invalidate) return;
+
+    this.animationTimer = setInterval(() => {
+      this.animationFrameIndex = (this.animationFrameIndex + 1) % SUBAGENT_SPINNER_FRAMES.length;
+      this.animationInvalidate?.();
+    }, SUBAGENT_SPINNER_INTERVAL_MS);
+  }
+
+  getAnimationFrame(): string {
+    return SUBAGENT_SPINNER_FRAMES[this.animationFrameIndex % SUBAGENT_SPINNER_FRAMES.length] ?? SUBAGENT_SPINNER_FRAMES[0]!;
+  }
+}
+
+function stopStableTextLineListAnimation(component: unknown): void {
+  if (component instanceof StableTextLineList) {
+    component.setAnimation(false);
+  }
 }
 
 function renderStableTextLineList(
   text: string,
-  context: { lastComponent?: unknown },
+  context: { lastComponent?: unknown; invalidate?: () => void },
+  animate: boolean = false,
 ): StableTextLineList {
   const component = context.lastComponent instanceof StableTextLineList
     ? context.lastComponent
     : new StableTextLineList();
+  component.setAnimation(animate, context.invalidate);
   component.setLines(
     text
       .split("\n")
       .map((line, index) => ({ id: `line:${index}`, text: line })),
   );
   return component;
+}
+
+function getStableTextLineAnimationFrame(component: unknown): string {
+  return component instanceof StableTextLineList ? component.getAnimationFrame() : SUBAGENT_SPINNER_FRAMES[0]!;
 }
 
 function compactToolStatusPrefix(
@@ -910,8 +1118,10 @@ function formatSubagentPid(pid: number | undefined): string {
 }
 
 function getSubagentPhase(snapshot: HarnessSubagentSnapshot | undefined, result?: HarnessSubagentRunResult): string {
-  if (result) return result.exitCode === 0 ? "done" : `exit ${result.exitCode}`;
+  if (result) return result.exitCode === 0 ? "done" : "failed";
   switch (snapshot?.livePhase) {
+    case "queued":
+      return "queued";
     case "starting":
       return "starting";
     case "running":
@@ -930,7 +1140,7 @@ function getSubagentPhase(snapshot: HarnessSubagentSnapshot | undefined, result?
 function getSubagentPhaseTone(snapshot: HarnessSubagentSnapshot | undefined, result?: HarnessSubagentRunResult): string {
   if ((result && result.exitCode !== 0) || snapshot?.livePhase === "failed") return "error";
   if (result || snapshot?.livePhase === "completed") return "success";
-  if (snapshot?.livePhase === "running" || snapshot?.livePhase === "tool_running") return "warning";
+  if (snapshot?.livePhase === "queued" || snapshot?.livePhase === "running" || snapshot?.livePhase === "tool_running") return "warning";
   return "muted";
 }
 
@@ -965,11 +1175,23 @@ function describeSubagentLiveActivity(snapshot: HarnessSubagentSnapshot | undefi
   if (!snapshot) return "waiting";
 
   if (snapshot.livePhase === "tool_running") {
-    const liveToolItem = findLastSubagentStreamItem(
+    const liveToolUpdate = findLastSubagentStreamItem(
       snapshot.recentStream,
-      (item) => item.type === "tool_execution_start" && item.toolName === snapshot.currentToolName,
+      (item) => item.type === "tool_execution_update"
+        && (item.toolCallId === snapshot.currentToolCallId
+          || (item.toolName === snapshot.currentToolName && !snapshot.currentToolCallId)),
     );
-    return formatSubagentToolActivity(snapshot.currentToolName, liveToolItem?.text);
+    if (liveToolUpdate?.toolName) {
+      return formatSubagentToolActivity(liveToolUpdate.toolName, liveToolUpdate.text);
+    }
+
+    const liveToolStart = findLastSubagentStreamItem(
+      snapshot.recentStream,
+      (item) => item.type === "tool_execution_start"
+        && (item.toolCallId === snapshot.currentToolCallId
+          || (item.toolName === snapshot.currentToolName && !snapshot.currentToolCallId)),
+    );
+    return formatSubagentToolActivity(snapshot.currentToolName, liveToolStart?.text);
   }
 
   const lastAssistant = findLastSubagentStreamItem(
@@ -981,9 +1203,10 @@ function describeSubagentLiveActivity(snapshot: HarnessSubagentSnapshot | undefi
 
   const lastItem = lastSubagentStreamItem(snapshot.recentStream);
   if (lastItem?.type === "tool_execution_end") {
-    return `${formatLiveToolName(lastItem.toolName ?? "tool")} ${lastItem.isError ? "failed" : "done"}`;
+    return formatSubagentToolActivity(lastItem.toolName, lastItem.text || (lastItem.isError ? "failed" : "done"));
   }
 
+  if (snapshot.livePhase === "queued") return "waiting";
   if (snapshot.livePhase === "starting") return "booting";
   if (snapshot.livePhase === "running") return "awaiting output";
   return "idle";
@@ -1012,17 +1235,21 @@ function lastSubagentToolEnd(
 function describeSubagentLastToolCall(
   snapshot: HarnessSubagentSnapshot | HarnessSubagentRunResult | undefined,
 ): string {
+  const lastToolEnd = lastSubagentToolEnd(snapshot);
+  if (lastToolEnd?.toolName) {
+    return formatSubagentToolActivity(lastToolEnd.toolName, lastToolEnd.text || (lastToolEnd.isError ? "failed" : "done"));
+  }
+
   const lastToolStart = lastSubagentToolStart(snapshot);
   if (lastToolStart?.toolName) {
     return formatSubagentToolActivity(lastToolStart.toolName, lastToolStart.text);
   }
 
-  const lastToolEnd = lastSubagentToolEnd(snapshot);
-  if (lastToolEnd?.toolName) {
-    return formatLiveToolName(lastToolEnd.toolName);
-  }
-
   return "";
+}
+
+function getSubagentResultStderr(result: { stderr?: string } | undefined): string {
+  return typeof result?.stderr === "string" ? result.stderr : "";
 }
 
 function describeCollapsedSubagentActivity(
@@ -1037,7 +1264,7 @@ function describeCollapsedSubagentActivity(
   }
 
   if (result?.exitCode !== 0) {
-    const stderrPreview = summarizeSubagentText(result.stderr, MAX_SUBAGENT_ACTIVITY_CHARS);
+    const stderrPreview = summarizeSubagentText(getSubagentResultStderr(result), MAX_SUBAGENT_ACTIVITY_CHARS);
     if (stderrPreview) {
       return {
         text: `stderr ${stderrPreview}`,
@@ -1068,24 +1295,74 @@ function describeCollapsedSubagentActivity(
   };
 }
 
+function isSubagentRowActive(
+  snapshot: HarnessSubagentSnapshot | undefined,
+  result: HarnessSubagentRunResult | undefined,
+): boolean {
+  if (result) return false;
+  if (!snapshot) return true;
+  return snapshot.livePhase !== "completed" && snapshot.livePhase !== "failed";
+}
+
+interface CollapsedSubagentLineDisplay {
+  label: string;
+  phaseTone: string;
+  renderedPhase: string;
+  activityText?: string;
+  activityTone?: string;
+}
+
+function getCollapsedSubagentLineDisplay(
+  label: string,
+  snapshot: HarnessSubagentSnapshot | undefined,
+  result: HarnessSubagentRunResult | undefined,
+  activeSpinnerFrame: string = SUBAGENT_SPINNER_FRAMES[0]!,
+): CollapsedSubagentLineDisplay {
+  const phaseTone = getSubagentPhaseTone(snapshot, result);
+  const activity = describeCollapsedSubagentActivity(snapshot, result);
+  const phase = getSubagentPhase(snapshot, result);
+  const renderedPhase = isSubagentRowActive(snapshot, result) ? `${activeSpinnerFrame} ${phase}` : phase;
+
+  return {
+    label,
+    phaseTone,
+    renderedPhase,
+    activityText: activity.text || undefined,
+    activityTone: activity.text ? activity.tone : undefined,
+  };
+}
+
+function formatCollapsedSubagentLineText(
+  label: string,
+  snapshot: HarnessSubagentSnapshot | undefined,
+  result: HarnessSubagentRunResult | undefined,
+  activeSpinnerFrame: string = SUBAGENT_SPINNER_FRAMES[0]!,
+): string {
+  const line = getCollapsedSubagentLineDisplay(label, snapshot, result, activeSpinnerFrame);
+  return [
+    `  ${line.label}`,
+    line.renderedPhase,
+    line.activityText,
+  ].filter(Boolean).join(" · ");
+}
+
 function renderCollapsedSubagentLine(
   label: string,
   snapshot: HarnessSubagentSnapshot | undefined,
   result: HarnessSubagentRunResult | undefined,
   theme: { fg: (token: string, text: string) => string; bold: (text: string) => string },
+  activeSpinnerFrame: string = SUBAGENT_SPINNER_FRAMES[0]!,
 ): string {
-  const phase = getSubagentPhase(snapshot, result);
-  const phaseTone = getSubagentPhaseTone(snapshot, result);
-  const activity = describeCollapsedSubagentActivity(snapshot, result);
+  const line = getCollapsedSubagentLineDisplay(label, snapshot, result, activeSpinnerFrame);
   const parts = [
-    `  ${theme.fg("toolTitle", theme.bold(label))}`,
+    `  ${theme.fg("toolTitle", theme.bold(line.label))}`,
     theme.fg("muted", "·"),
-    theme.fg(phaseTone, phase),
+    theme.fg(line.phaseTone, line.renderedPhase),
   ];
 
-  if (activity.text) {
+  if (line.activityText) {
     parts.push(theme.fg("muted", "·"));
-    parts.push(theme.fg(activity.tone, activity.text));
+    parts.push(theme.fg(line.activityTone ?? "muted", line.activityText));
   }
 
   return parts.join(" ");
@@ -1124,7 +1401,7 @@ function summarizeExploreCollapsedActivity(
   }
 
   if (result.exitCode !== 0) {
-    const stderrPreview = summarizeSubagentText(result.stderr, MAX_SUBAGENT_ACTIVITY_CHARS);
+    const stderrPreview = summarizeSubagentText(getSubagentResultStderr(result), MAX_SUBAGENT_ACTIVITY_CHARS);
     if (stderrPreview) return `stderr ${stderrPreview}`;
   }
 
@@ -1141,7 +1418,7 @@ function summarizeExecuteCollapsedActivity(
   }
 
   if (result.exitCode !== 0) {
-    const stderrPreview = summarizeSubagentText(result.stderr, MAX_SUBAGENT_ACTIVITY_CHARS);
+    const stderrPreview = summarizeSubagentText(getSubagentResultStderr(result), MAX_SUBAGENT_ACTIVITY_CHARS);
     if (stderrPreview) return `stderr ${stderrPreview}`;
   }
 
@@ -1233,7 +1510,15 @@ function renderSubagentRecentStreamLines(
       continue;
     }
 
-    lines.push(`${theme.fg("dim", `    [${at}]`)} ${theme.fg(item.isError ? "error" : "success", `${item.isError ? "✗" : "✓"} ${formatLiveToolName(item.toolName ?? "tool")}`)}`);
+    if (item.type === "tool_execution_update") {
+      lines.push(`${theme.fg("dim", `    [${at}]`)} ${theme.fg("warning", `… ${formatSubagentToolActivity(item.toolName, item.text, MAX_SUBAGENT_OUTPUT_LINE_CHARS)}`)}`);
+      continue;
+    }
+
+    const toolSummary = item.text
+      ? `${formatLiveToolName(item.toolName ?? "tool")} ${summarizeSubagentText(item.text, MAX_SUBAGENT_OUTPUT_LINE_CHARS)}`
+      : formatLiveToolName(item.toolName ?? "tool");
+    lines.push(`${theme.fg("dim", `    [${at}]`)} ${theme.fg(item.isError ? "error" : "success", `${item.isError ? "✗" : "✓"} ${toolSummary}`)}`);
   }
 
   return lines;
@@ -1260,6 +1545,7 @@ function renderSubagentPreviewLines(
 function renderExploreSubagentCollapsedText(
   details: ExploreSubagentToolDetails,
   theme: { fg: (token: string, text: string) => string; bold: (text: string) => string },
+  activeSpinnerFrame: string = SUBAGENT_SPINNER_FRAMES[0]!,
 ): string {
   const totalSearches = details.results.reduce((sum, result) => sum + result.searches, 0);
   const totalFetches = details.results.reduce((sum, result) => sum + result.fetches, 0);
@@ -1281,7 +1567,7 @@ function renderExploreSubagentCollapsedText(
   for (const role of EXPLORE_SUBAGENT_ROLES) {
     const result = details.results.find((entry) => entry.persona === role.persona);
     const snapshot = details.snapshots.find((entry) => entry.role === role.persona);
-    lines.push(renderCollapsedSubagentLine(`${role.icon} ${role.persona}`, snapshot, result, theme));
+    lines.push(renderCollapsedSubagentLine(`${role.icon} ${role.persona}`, snapshot, result, theme, activeSpinnerFrame));
   }
 
   return lines.join("\n");
@@ -1290,6 +1576,7 @@ function renderExploreSubagentCollapsedText(
 function renderExecuteSubagentCollapsedText(
   details: ExecuteSubagentToolDetails,
   theme: { fg: (token: string, text: string) => string; bold: (text: string) => string },
+  activeSpinnerFrame: string = SUBAGENT_SPINNER_FRAMES[0]!,
 ): string {
   const failures = details.results.filter((result) => result.exitCode !== 0).length;
   const status = details.completed >= details.total
@@ -1316,7 +1603,7 @@ function renderExecuteSubagentCollapsedText(
     const snapshot = details.snapshots.find((entry) => entry.role === role);
     const result = details.results.find((entry) => entry.role === role);
     const spec = resolveExecuteRole(role);
-    lines.push(renderCollapsedSubagentLine(`${spec.icon} ${role}`, snapshot, result, theme));
+    lines.push(renderCollapsedSubagentLine(`${spec.icon} ${role}`, snapshot, result, theme, activeSpinnerFrame));
   }
 
   return lines.join("\n");
@@ -1360,8 +1647,8 @@ function renderExploreSubagentExpandedText(
     lines.push(...renderSubagentRecentStreamLines(source, theme));
     lines.push(`  ${theme.fg("muted", "Output preview:")}`);
     lines.push(...renderSubagentPreviewLines(result?.output ?? source?.assistantPreview, theme));
-    if (result?.stderr.trim()) {
-      lines.push(`  ${theme.fg("muted", "stderr:")} ${theme.fg("error", summarizeSubagentText(result.stderr, MAX_SUBAGENT_STDERR_PREVIEW_CHARS))}`);
+    if (getSubagentResultStderr(result).trim()) {
+      lines.push(`  ${theme.fg("muted", "stderr:")} ${theme.fg("error", summarizeSubagentText(getSubagentResultStderr(result), MAX_SUBAGENT_STDERR_PREVIEW_CHARS))}`);
     }
   }
 
@@ -1406,8 +1693,8 @@ function renderExecuteSubagentExpandedText(
     lines.push(...renderSubagentRecentStreamLines(source, theme));
     lines.push(`  ${theme.fg("muted", "Output preview:")}`);
     lines.push(...renderSubagentPreviewLines(result?.output ?? source?.assistantPreview, theme));
-    if (result?.stderr.trim()) {
-      lines.push(`  ${theme.fg("muted", "stderr:")} ${theme.fg("error", summarizeSubagentText(result.stderr, MAX_SUBAGENT_STDERR_PREVIEW_CHARS))}`);
+    if (getSubagentResultStderr(result).trim()) {
+      lines.push(`  ${theme.fg("muted", "stderr:")} ${theme.fg("error", summarizeSubagentText(getSubagentResultStderr(result), MAX_SUBAGENT_STDERR_PREVIEW_CHARS))}`);
     }
   }
 
@@ -1417,6 +1704,7 @@ function renderExecuteSubagentExpandedText(
 function renderHarnessSubagentsCollapsedText(
   details: HarnessSubagentsToolDetails,
   theme: { fg: (token: string, text: string) => string; bold: (text: string) => string },
+  activeSpinnerFrame: string = SUBAGENT_SPINNER_FRAMES[0]!,
 ): string {
   const failures = details.results.filter((result) => result.exitCode !== 0).length;
   const totalSearches = details.results.reduce((sum, result) => sum + result.searches, 0);
@@ -1446,10 +1734,10 @@ function renderHarnessSubagentsCollapsedText(
   ].filter(Boolean).join(` ${theme.fg("muted", "·")} `)];
 
   for (const subagent of details.subagents) {
-    const result = details.results.find((entry) => entry.role === subagent.role);
-    const snapshot = details.snapshots.find((entry) => entry.role === subagent.role);
-    const label = subagent.icon ? `${subagent.icon} ${subagent.role}` : subagent.role;
-    lines.push(renderCollapsedSubagentLine(label, snapshot, result, theme));
+    const result = details.results.find((entry) => entry.instanceId === subagent.instanceId);
+    const snapshot = details.snapshots.find((entry) => entry.instanceId === subagent.instanceId);
+    const label = subagent.icon ? `${subagent.icon} ${subagent.label}` : subagent.label;
+    lines.push(renderCollapsedSubagentLine(label, snapshot, result, theme, activeSpinnerFrame));
   }
 
   return lines.join("\n");
@@ -1465,8 +1753,8 @@ function renderHarnessSubagentsExpandedText(
   lines.push(theme.fg("muted", `Mode: ${details.mode} · ${details.completed}/${details.total} subagents complete${isPartial ? " · live" : ""}`));
 
   for (const subagent of details.subagents) {
-    const result = details.results.find((entry) => entry.role === subagent.role);
-    const snapshot = details.snapshots.find((entry) => entry.role === subagent.role);
+    const result = details.results.find((entry) => entry.instanceId === subagent.instanceId);
+    const snapshot = details.snapshots.find((entry) => entry.instanceId === subagent.instanceId);
     const source = snapshot ?? result;
     const phase = getSubagentPhase(snapshot, result);
     const phaseTone = getSubagentPhaseTone(snapshot, result);
@@ -1494,8 +1782,8 @@ function renderHarnessSubagentsExpandedText(
     lines.push(...renderSubagentRecentStreamLines(source, theme));
     lines.push(`  ${theme.fg("muted", "Output preview:")}`);
     lines.push(...renderSubagentPreviewLines(result?.output ?? source?.assistantPreview, theme));
-    if (result?.stderr.trim()) {
-      lines.push(`  ${theme.fg("muted", "stderr:")} ${theme.fg("error", summarizeSubagentText(result.stderr, MAX_SUBAGENT_STDERR_PREVIEW_CHARS))}`);
+    if (getSubagentResultStderr(result).trim()) {
+      lines.push(`  ${theme.fg("muted", "stderr:")} ${theme.fg("error", summarizeSubagentText(getSubagentResultStderr(result), MAX_SUBAGENT_STDERR_PREVIEW_CHARS))}`);
     }
   }
 
@@ -1604,7 +1892,7 @@ function buildPersistedSubagentRunRecord(
     result.output || result.assistantPreview,
     MAX_SUBAGENT_RECORD_OUTPUT_PREVIEW_CHARS,
   ) || undefined;
-  const stderrPreview = summarizeSubagentText(result.stderr, MAX_SUBAGENT_RECORD_STDERR_PREVIEW_CHARS) || undefined;
+  const stderrPreview = summarizeSubagentText(getSubagentResultStderr(result), MAX_SUBAGENT_RECORD_STDERR_PREVIEW_CHARS) || undefined;
 
   return {
     role: String(result.role),
@@ -3222,16 +3510,29 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
         throw new Error("harness_subagents requires at least one valid subagent definition.");
       }
 
-      const descriptors = definitions.map(({ role, label, icon }) => ({ role, label, icon }));
+      const descriptors = definitions.map(({ role, instanceId, declaredIndex, label, icon }) => ({
+        role,
+        instanceId,
+        declaredIndex,
+        label,
+        icon,
+      }));
       const modelSpec = modelToCliSpec(ctx.model as { provider?: string; id?: string } | undefined);
       const thinkingLevel = pi.getThinkingLevel();
       const genericSubagentChildMode = resolveGenericSubagentChildMode(getRuntimeProtocol());
       let latestSnapshots: HarnessSubagentSnapshot<string>[] = [];
       const batchStartedAt = new Date().toISOString();
+      const livePartialEmitter = createLiveSubagentPartialEmitter<HarnessSubagentsToolDetails>({
+        onUpdate,
+        isActive: (details) => details.completed < details.total,
+        renderText: (details, spinnerFrame) => formatHarnessSubagentsLivePartialText(details, spinnerFrame),
+      });
 
       const specs: HarnessSubagentSpec<string>[] = definitions.map((subagent) => ({
         mode: genericSubagentChildMode,
         role: subagent.role,
+        instanceId: subagent.instanceId,
+        declaredIndex: subagent.declaredIndex,
         label: `${subagent.icon ? `${subagent.icon} ` : ""}${subagent.label}`,
         task: subagent.task,
         systemPrompt: subagent.systemPrompt,
@@ -3265,10 +3566,7 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
             latestSnapshots = snapshots;
             const details = buildHarnessSubagentsDetails(params.subject, mode, descriptors, completed, total, batchResults, snapshots);
             updateUI(ctx);
-            onUpdate?.({
-              content: [{ type: "text", text: summarizeHarnessSubagentsProgress(details) }],
-              details,
-            });
+            livePartialEmitter.update(details);
           },
         });
 
@@ -3294,6 +3592,7 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
           details,
         };
       } finally {
+        livePartialEmitter.stop();
         updateUI(ctx);
       }
     },
@@ -3315,17 +3614,29 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
       );
     },
     renderResult(result, { expanded, isPartial }, theme, context) {
+      const partialText = isPartial && !expanded ? extractToolTextContent(result) : "";
+      if (partialText) {
+        return renderStableTextLineList(partialText, context, false);
+      }
+
       const details = result.details as HarnessSubagentsToolDetails | undefined;
       if (!details) {
+        stopStableTextLineListAnimation(context.lastComponent);
         const fallback = summarizeSubagentText(extractToolTextContent(result), 160) || undefined;
         return renderCompactToolResult(result, { expanded }, theme, context, fallback);
       }
 
       if (expanded) {
+        stopStableTextLineListAnimation(context.lastComponent);
         return new Text(renderHarnessSubagentsExpandedText(details, isPartial, theme), 0, 0);
       }
 
-      return renderStableTextLineList(renderHarnessSubagentsCollapsedText(details, theme), context);
+      const activeSpinnerFrame = getStableTextLineAnimationFrame(context.lastComponent);
+      return renderStableTextLineList(
+        renderHarnessSubagentsCollapsedText(details, theme, activeSpinnerFrame),
+        context,
+        details.completed < details.total,
+      );
     },
   });
 
@@ -3349,10 +3660,17 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
       const thinkingLevel = pi.getThinkingLevel();
       let latestSnapshots: HarnessSubagentSnapshot<ExplorePersona>[] = [];
       const batchStartedAt = new Date().toISOString();
+      const livePartialEmitter = createLiveSubagentPartialEmitter<ExploreSubagentToolDetails>({
+        onUpdate,
+        isActive: (details) => details.completed < details.total,
+        renderText: (details, spinnerFrame) => formatExploreSubagentLivePartialText(details, spinnerFrame),
+      });
 
-      const specs: HarnessSubagentSpec<ExplorePersona>[] = EXPLORE_SUBAGENT_ROLES.map((role) => ({
+      const specs: HarnessSubagentSpec<ExplorePersona>[] = EXPLORE_SUBAGENT_ROLES.map((role, declaredIndex) => ({
         mode: "explore",
         role: role.persona,
+        instanceId: `explore:${declaredIndex}:${role.persona}`,
+        declaredIndex,
         label: `${role.icon} ${role.label}`,
         task: buildExploreSubagentTask(role, params.topic, params.project_context),
         systemPrompt: buildExploreSubagentSystemPrompt(role),
@@ -3375,10 +3693,7 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
             latestSnapshots = snapshots;
             const details = buildExploreSubagentDetails(params.topic, completed, total, batchResults, snapshots);
             updateUI(ctx);
-            onUpdate?.({
-              content: [{ type: "text", text: summarizeExploreSubagentProgress(details) }],
-              details,
-            });
+            livePartialEmitter.update(details);
           },
         });
 
@@ -3402,29 +3717,42 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
           details,
         };
       } finally {
+        livePartialEmitter.stop();
         updateUI(ctx);
       }
     },
     renderCall(args, theme, context) {
       const topic = summarizeSubagentText(args.topic, MAX_SUBAGENT_CALL_PREVIEW_CHARS) || "...";
       return new Text(
-        `${compactToolTitle(theme, context, "explore_subagents")} ${theme.fg("accent", topic)}${theme.fg("muted", " · OPT/PRA/SKP/EMP · parallel")}`, 
+        `${compactToolTitle(theme, context, "explore_subagents")} ${theme.fg("accent", topic)}${theme.fg("muted", " · OPT/PRA/SKP/EMP · parallel")}`,
         0,
         0,
       );
     },
     renderResult(result, { expanded, isPartial }, theme, context) {
+      const partialText = isPartial && !expanded ? extractToolTextContent(result) : "";
+      if (partialText) {
+        return renderStableTextLineList(partialText, context, false);
+      }
+
       const details = result.details as ExploreSubagentToolDetails | undefined;
       if (!details) {
+        stopStableTextLineListAnimation(context.lastComponent);
         const fallback = summarizeSubagentText(extractToolTextContent(result), 160) || undefined;
         return renderCompactToolResult(result, { expanded }, theme, context, fallback);
       }
 
       if (expanded) {
+        stopStableTextLineListAnimation(context.lastComponent);
         return new Text(renderExploreSubagentExpandedText(details, isPartial, theme), 0, 0);
       }
 
-      return renderStableTextLineList(renderExploreSubagentCollapsedText(details, theme), context);
+      const activeSpinnerFrame = getStableTextLineAnimationFrame(context.lastComponent);
+      return renderStableTextLineList(
+        renderExploreSubagentCollapsedText(details, theme, activeSpinnerFrame),
+        context,
+        details.completed < details.total,
+      );
     },
   });
 
@@ -3460,12 +3788,19 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
       const thinkingLevel = pi.getThinkingLevel();
       let latestSnapshots: HarnessSubagentSnapshot<ExecuteRole>[] = [];
       const batchStartedAt = new Date().toISOString();
+      const livePartialEmitter = createLiveSubagentPartialEmitter<ExecuteSubagentToolDetails>({
+        onUpdate,
+        isActive: (details) => details.completed < details.total,
+        renderText: (details, spinnerFrame) => formatExecuteSubagentLivePartialText(details, spinnerFrame),
+      });
 
-      const specs: HarnessSubagentSpec<ExecuteRole>[] = roles.map((role) => {
+      const specs: HarnessSubagentSpec<ExecuteRole>[] = roles.map((role, declaredIndex) => {
         const spec = resolveExecuteRole(role);
         return {
           mode: "execute",
           role: spec.role,
+          instanceId: `execute:${declaredIndex}:${spec.role}`,
+          declaredIndex,
           label: `${spec.icon} ${spec.label}`,
           task: buildExecuteRoleTask(spec, params.objective, params.context),
           systemPrompt: buildExecuteRoleSystemPrompt(spec),
@@ -3500,10 +3835,7 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
             latestSnapshots = snapshots;
             const details = buildExecuteSubagentDetails(params.objective, mode, roles, completed, total, batchResults, snapshots);
             updateUI(ctx);
-            onUpdate?.({
-              content: [{ type: "text", text: summarizeExecuteSubagentProgress(details) }],
-              details,
-            });
+            livePartialEmitter.update(details);
           },
         });
 
@@ -3529,6 +3861,7 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
           details,
         };
       } finally {
+        livePartialEmitter.stop();
         updateUI(ctx);
       }
     },
@@ -3547,17 +3880,29 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
       );
     },
     renderResult(result, { expanded, isPartial }, theme, context) {
+      const partialText = isPartial && !expanded ? extractToolTextContent(result) : "";
+      if (partialText) {
+        return renderStableTextLineList(partialText, context, false);
+      }
+
       const details = result.details as ExecuteSubagentToolDetails | undefined;
       if (!details) {
+        stopStableTextLineListAnimation(context.lastComponent);
         const fallback = summarizeSubagentText(extractToolTextContent(result), 160) || undefined;
         return renderCompactToolResult(result, { expanded }, theme, context, fallback);
       }
 
       if (expanded) {
+        stopStableTextLineListAnimation(context.lastComponent);
         return new Text(renderExecuteSubagentExpandedText(details, isPartial, theme), 0, 0);
       }
 
-      return renderStableTextLineList(renderExecuteSubagentCollapsedText(details, theme), context);
+      const activeSpinnerFrame = getStableTextLineAnimationFrame(context.lastComponent);
+      return renderStableTextLineList(
+        renderExecuteSubagentCollapsedText(details, theme, activeSpinnerFrame),
+        context,
+        details.completed < details.total,
+      );
     },
   });
 
