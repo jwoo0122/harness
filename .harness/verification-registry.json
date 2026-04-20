@@ -503,6 +503,193 @@
         ],
         "description": "Aggregate validation and source-backed checks for iteration 10 verification accumulation: v2 committed specs, legacy migration, repo-shared append-only receipts, explicit runtime corruption failure, register/run/list tool wiring, and receipt-derived status behavior."
       }
+    },
+    "AC-11.1": {
+      "check_id": "AC-11.1",
+      "bindings": [
+        {
+          "binding_id": "AC-11.1",
+          "requirement": "Managed-worktree presentation state is explicit and testable",
+          "source": "target/execute/iteration-11-managed-worktree-identity-ui-20260420-143504.md",
+          "registeredAt": "INC-1"
+        }
+      ],
+      "verification": {
+        "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
+        "command": "npm run validate:extensions",
+        "files": [
+          "extensions/managed-worktree-presentation.ts",
+          "extensions/index.ts",
+          "tests/extensions/validate-managed-worktree-identity-ui.mjs",
+          "package.json"
+        ],
+        "description": "Runs the extension validation chain, including the managed-worktree presentation seam validator that imports the helper directly and checks explicit unmanaged/healthy/degraded state derivation plus root wiring."
+      }
+    },
+    "AC-11.2": {
+      "check_id": "AC-11.2",
+      "bindings": [
+        {
+          "binding_id": "AC-11.2",
+          "requirement": "Always-on below-editor widget is the primary managed-worktree identity surface",
+          "source": "target/execute/iteration-11-managed-worktree-identity-ui-20260420-143504.md",
+          "registeredAt": "INC-1"
+        }
+      ],
+      "verification": {
+        "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
+        "command": "npm run validate:extensions",
+        "files": [
+          "extensions/index.ts",
+          "tests/extensions/validate-managed-worktree-identity-ui.mjs",
+          "tests/extensions/validate-explore-gate.mjs"
+        ],
+        "description": "Runs the validation chain, including source checks that the managed widget renders below the editor via setWidget(..., { placement: \"belowEditor\" }) and remains scoped to the managed harness surface rather than the removed live protocol widget."
+      }
+    },
+    "AC-11.3": {
+      "check_id": "AC-11.3",
+      "bindings": [
+        {
+          "binding_id": "AC-11.3",
+          "requirement": "Widget copy is identity-first and location-aware",
+          "source": "target/execute/iteration-11-managed-worktree-identity-ui-20260420-143504.md",
+          "registeredAt": "INC-1"
+        }
+      ],
+      "verification": {
+        "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
+        "command": "npm run validate:extensions",
+        "files": [
+          "extensions/managed-worktree-presentation.ts",
+          "tests/extensions/validate-managed-worktree-identity-ui.mjs"
+        ],
+        "description": "Runs the validation chain, including deterministic healthy-state cases for managed root, target entry cwd, and nested subdirectories to verify the widget/status include both managed identity and readable relative location without defaulting to absolute paths or full branch names."
+      }
+    },
+    "AC-11.4": {
+      "check_id": "AC-11.4",
+      "bindings": [
+        {
+          "binding_id": "AC-11.4",
+          "requirement": "Degraded managed states escalate in the same widget surface",
+          "source": "target/execute/iteration-11-managed-worktree-identity-ui-20260420-143504.md",
+          "registeredAt": "INC-1"
+        }
+      ],
+      "verification": {
+        "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
+        "command": "npm run validate:extensions",
+        "files": [
+          "extensions/managed-worktree-presentation.ts",
+          "tests/extensions/validate-managed-worktree-identity-ui.mjs",
+          "extensions/index.ts"
+        ],
+        "description": "Runs the validation chain, including deterministic degraded-state cases for provisioning, managed-released, managed-missing, manual-cleanup-required, missing lease, missing path, and cwd outside the bound target, proving the same widget surface escalates copy and blocked messaging."
+      }
+    },
+    "AC-11.5": {
+      "check_id": "AC-11.5",
+      "bindings": [
+        {
+          "binding_id": "AC-11.5",
+          "requirement": "Compact footer/status fallback remains, but built-in footer ownership stays with pi",
+          "source": "target/execute/iteration-11-managed-worktree-identity-ui-20260420-143504.md",
+          "registeredAt": "INC-1"
+        }
+      ],
+      "verification": {
+        "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
+        "command": "npm run validate:extensions",
+        "files": [
+          "extensions/index.ts",
+          "tests/extensions/validate-managed-worktree-identity-ui.mjs",
+          "tests/extensions/validate-managed-worktree-lifecycle.mjs"
+        ],
+        "description": "Runs the validation chain, including source checks that setStatus() still carries compact managed identity in idle and execute compositions while setFooter() is not used for this feature and lifecycle status markers remain present."
+      }
+    },
+    "AC-11.6": {
+      "check_id": "AC-11.6",
+      "bindings": [
+        {
+          "binding_id": "AC-11.6",
+          "requirement": "Managed-worktree identity UI honors current cwd changes within the managed workspace",
+          "source": "target/execute/iteration-11-managed-worktree-identity-ui-20260420-143504.md",
+          "registeredAt": "INC-1"
+        }
+      ],
+      "verification": {
+        "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
+        "command": "npm run validate:extensions",
+        "files": [
+          "extensions/index.ts",
+          "extensions/managed-worktree-presentation.ts",
+          "tests/extensions/validate-managed-worktree-identity-ui.mjs",
+          "tests/extensions/validate-managed-worktree-lifecycle.mjs"
+        ],
+        "description": "Runs the validation chain, including deterministic root/entry/nested/outside-target cwd cases and source checks that turn_end refreshes the managed UI from current session cwd rather than freezing the original entry cwd."
+      }
+    },
+    "AC-11.7": {
+      "check_id": "AC-11.7",
+      "bindings": [
+        {
+          "binding_id": "AC-11.7",
+          "requirement": "RPC parity uses text-first status/widget rendering",
+          "source": "target/execute/iteration-11-managed-worktree-identity-ui-20260420-143504.md",
+          "registeredAt": "INC-1"
+        }
+      ],
+      "verification": {
+        "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
+        "command": "npm run validate:extensions",
+        "files": [
+          "extensions/managed-worktree-presentation.ts",
+          "extensions/index.ts",
+          "tests/extensions/validate-managed-worktree-identity-ui.mjs"
+        ],
+        "description": "Runs the validation chain, including assertions that the managed widget renderer returns plain string arrays and that the compact status remains on the normal status API, preserving the core identity/degraded signal in RPC-compatible text surfaces."
+      }
+    },
+    "AC-11.8": {
+      "check_id": "AC-11.8",
+      "bindings": [
+        {
+          "binding_id": "AC-11.8",
+          "requirement": "Validation covers managed-worktree identity UI policy deterministically",
+          "source": "target/execute/iteration-11-managed-worktree-identity-ui-20260420-143504.md",
+          "registeredAt": "INC-1"
+        }
+      ],
+      "verification": {
+        "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
+        "command": "npm run validate:extensions",
+        "files": [
+          "package.json",
+          "extensions/managed-worktree-presentation.ts",
+          "tests/extensions/validate-managed-worktree-identity-ui.mjs",
+          "tests/extensions/validate-explore-gate.mjs",
+          "tests/extensions/validate-managed-worktree-lifecycle.mjs"
+        ],
+        "description": "Runs the validation chain after package.json wiring updates, confirming the new presentation seam, below-editor widget path, managed-only scope, compact status fallback, no footer takeover, healthy/degraded distinction, cwd-sensitive refresh, and RPC-compatible text rendering are all covered deterministically."
+      }
     }
   }
 }
