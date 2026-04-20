@@ -32,7 +32,8 @@ for (const marker of [
   'writeManagedSessionFile({',
   'hasRelevantGitStatusChanges(statusResult.stdout, repoContext.repoRoot, ignoredStatusPaths)',
   'headOnlyFromDirty',
-  'uncommitted changes are not carried into the new worktree',
+  'evaluateDirtyExecuteBootstrap({',
+  'dirtyDecision.notification',
 ]) {
   assert.ok(indexSource.includes(marker), `extensions/index.ts missing bootstrap marker: ${marker}`);
 }

@@ -322,6 +322,126 @@
       "registeredAt": "INC-1",
       "lastVerifiedAt": "INC-1",
       "lastResult": "pass"
+    },
+    "AC-11.1": {
+      "requirement": "`/execute` auto-bootstrap uses managed worktrees when needed",
+      "source": ".iteration-11-criteria.md",
+      "verification": {
+        "strategy": "automated-test",
+        "command": "npm run validate:extensions",
+        "files": [
+          "extensions/index.ts",
+          "extensions/execute-managed-bootstrap.ts",
+          "extensions/managed-worktrees.ts",
+          "tests/extensions/validate-execute-auto-bootstrap.mjs",
+          "tests/extensions/validate-managed-worktree-bootstrap.mjs",
+          "tests/extensions/validate-managed-mutation-gate.mjs",
+          "package.json"
+        ],
+        "description": "Validation chain exercises the pure execute auto-bootstrap routing seam plus temp-repo/session-file smoke so unmanaged /execute runs route into the internal managed bootstrap path before work starts, preserve execute context across the switch, and keep child managed-binding coverage in the same chain."
+      },
+      "registeredAt": "INC-1",
+      "lastVerifiedAt": "INC-1",
+      "lastResult": "pass"
+    },
+    "AC-11.2": {
+      "requirement": "Valid managed execute sessions are reused, not duplicated",
+      "source": ".iteration-11-criteria.md",
+      "verification": {
+        "strategy": "automated-test",
+        "command": "npm run validate:extensions",
+        "files": [
+          "extensions/index.ts",
+          "extensions/execute-managed-bootstrap.ts",
+          "extensions/managed-worktrees.ts",
+          "tests/extensions/validate-execute-auto-bootstrap.mjs",
+          "tests/extensions/validate-managed-mutation-gate.mjs",
+          "package.json"
+        ],
+        "description": "Validation chain executes the managed reuse decision seam and mutation-gate coverage so valid managed /execute sessions stay on /skill:execute in place, while stale or mismatched bindings fail explicitly instead of silently creating duplicates."
+      },
+      "registeredAt": "INC-1",
+      "lastVerifiedAt": "INC-1",
+      "lastResult": "pass"
+    },
+    "AC-11.3": {
+      "requirement": "Dirty unmanaged source checkout blocks or requires explicit execute-time confirmation",
+      "source": ".iteration-11-criteria.md",
+      "verification": {
+        "strategy": "automated-test",
+        "command": "npm run validate:extensions",
+        "files": [
+          "extensions/index.ts",
+          "extensions/execute-managed-bootstrap.ts",
+          "tests/extensions/validate-execute-auto-bootstrap.mjs",
+          "tests/extensions/validate-managed-worktree-bootstrap.mjs",
+          "package.json"
+        ],
+        "description": "Validation chain exercises dirty execute confirm/cancel helpers and temp-repo HEAD-only smoke so dirty unmanaged startup requires explicit confirmation, aborts cleanly when declined, and leaves tracked source edits behind instead of carrying them into the managed worktree."
+      },
+      "registeredAt": "INC-1",
+      "lastVerifiedAt": "INC-1",
+      "lastResult": "pass"
+    },
+    "AC-11.4": {
+      "requirement": "Execute startup sequencing is deterministic across the session switch boundary",
+      "source": ".iteration-11-criteria.md",
+      "verification": {
+        "strategy": "automated-test",
+        "command": "npm run validate:extensions",
+        "files": [
+          "extensions/index.ts",
+          "extensions/execute-managed-bootstrap.ts",
+          "extensions/managed-worktrees.ts",
+          "tests/extensions/validate-execute-auto-bootstrap.mjs",
+          "package.json"
+        ],
+        "description": "Validation chain proves pending execute routing is cleared before the unmanaged switch, the target session persists a pending execute-resume marker, and session_start consumes and replays the visible /execute command exactly once in the managed session."
+      },
+      "registeredAt": "INC-1",
+      "lastVerifiedAt": "INC-1",
+      "lastResult": "pass"
+    },
+    "AC-11.5": {
+      "requirement": "Public workflow remains worktree-opaque",
+      "source": ".iteration-11-criteria.md",
+      "verification": {
+        "strategy": "automated-test",
+        "command": "npm run validate:extensions",
+        "files": [
+          "README.md",
+          "skills/execute/SKILL.md",
+          "extensions/index.ts",
+          "tests/extensions/validate-execute-auto-bootstrap.mjs",
+          "tests/extensions/validate-managed-worktree-bootstrap.mjs",
+          "tests/extensions/validate-protocol-invocation.mjs",
+          "package.json"
+        ],
+        "description": "Validation chain confirms internal managed-worktree commands/tools remain undocumented in public docs and skills, `/execute` remains the visible entrypoint, and built-in `/new` parsing remains unchanged."
+      },
+      "registeredAt": "INC-1",
+      "lastVerifiedAt": "INC-1",
+      "lastResult": "pass"
+    },
+    "AC-11.6": {
+      "requirement": "Validation deterministically covers execute auto-bootstrap behavior",
+      "source": ".iteration-11-criteria.md",
+      "verification": {
+        "strategy": "automated-test",
+        "command": "npm run validate:extensions",
+        "files": [
+          "package.json",
+          "extensions/execute-managed-bootstrap.ts",
+          "tests/extensions/validate-execute-auto-bootstrap.mjs",
+          "tests/extensions/validate-managed-worktree-bootstrap.mjs",
+          "tests/extensions/validate-managed-mutation-gate.mjs",
+          "tests/extensions/validate-protocol-invocation.mjs"
+        ],
+        "description": "Validation chain syntax-checks the execute managed-bootstrap helper seam and deterministically exercises unmanaged bootstrap routing, managed reuse, dirty confirmation/cancel behavior, session-switch resume semantics, duplicate suppression, and unchanged `/new` behavior alongside the managed bootstrap and mutation-gate validators."
+      },
+      "registeredAt": "INC-1",
+      "lastVerifiedAt": "INC-1",
+      "lastResult": "pass"
     }
   }
 }
