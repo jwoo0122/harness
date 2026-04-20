@@ -95,7 +95,7 @@ Gather current state. All four personas share this factual base.
 ```
 1. Read CLAUDE.md — architecture constraints & open decisions
 2. Read README.md — current iteration status
-3. Read the latest .iteration-*-criteria.md
+3. Read the latest `/.target/criteria/*.md` criteria / PRD doc if one exists
 4. List crate Cargo.toml files — dependency versions, feature flags
 5. Read examples/smoke/scene.json — current wire format
 6. Scan: rg -n 'TODO|FIXME|HACK' --type rust
@@ -168,7 +168,7 @@ Forbidden here:
 
 ### Phase 6 — Output document
 
-If the environment allows documentation writes, write to: `target/explore/<topic-slug>-<YYYYMMDD-HHMMSS>.md`
+If the environment allows documentation writes, write to: `/.target/explore/<topic-slug>-<YYYYMMDD-HHMMSS>.md`
 Otherwise, return the same markdown inline.
 
 ```markdown
@@ -232,5 +232,5 @@ Print the document path when written, plus a per-decision summary and readiness 
 1. User has reviewed the debate transcript and planning packet
 2. User signs off on synthesis positions (or overrides them)
 3. Concrete work plan blockers / clarification questions are resolved or explicitly accepted as assumptions
-4. Requirements criteria written as `.iteration-N-criteria.md`
-5. → `/execute` with the criteria file
+4. Requirements criteria / PRD written as a temporary gitignored doc under `/.target/criteria/<name>.md`
+5. → `/execute /.target/criteria/<name>.md`

@@ -13,6 +13,12 @@ import {
 } from "./agent-prompts.js";
 import { classifyChildBashCommand, classifyExploreBash, isAgentBrowserCommand } from "./bash-policy.js";
 import { registerCompactBuiltinToolRenderers } from "./compact-tool-renderers.js";
+import {
+  EXECUTE_CRITERIA_DIRECTORY,
+  type ExecuteCriteriaValidationResult,
+  rehydrateManagedCriteriaDocument,
+  validateExecuteCriteriaCandidate,
+} from "./criteria-docs.js";
 import { evaluateExploreEvidenceGate } from "./explore-gate.js";
 import {
   type HarnessProtocol,
@@ -92,6 +98,7 @@ interface ACStatus {
 
 interface HarnessState {
   criteriaFile?: string;
+  criteriaContent?: string;
   acStatuses: ACStatus[];
   currentIncrement?: string;
   regressionCount: number;
@@ -1980,6 +1987,7 @@ export default function (pi: ExtensionAPI) {
   let executeTotals = createExecuteSubagentTotals();
   let currentManagedBinding: ManagedSessionBinding | undefined;
   let currentManagedLease: ManagedWorktreeLease | undefined;
+  let executeEntryBlockReason: string | undefined;
 
   function getRuntimeProtocol(): HarnessProtocol | "generic" {
     if (IS_SUBAGENT_CHILD) {
@@ -2015,6 +2023,49 @@ export default function (pi: ExtensionAPI) {
 
   function saveState() {
     pi.appendEntry("cognitive-harness-state", { ...state });
+  }
+
+  async function validateExecuteCriteriaForInvocation(rawPath: string | undefined, ctx: ExtensionContext): Promise<ExecuteCriteriaValidationResult> {
+    let repoContext;
+    try {
+      repoContext = await getGitRepoContext(ctx.cwd);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      return {
+        ok: false,
+        reason: `Managed execute criteria validation requires a git repository: ${reason}`,
+      };
+    }
+
+    return validateExecuteCriteriaCandidate({
+      repoRoot: repoContext.repoRoot,
+      cwd: ctx.cwd,
+      rawPath: rawPath ?? "",
+      runGit: async (args) => {
+        const result = await execGit(["-C", repoContext.repoRoot, ...args], 10_000, ctx.signal);
+        return {
+          code: result.code,
+          stdout: result.stdout,
+          stderr: result.stderr,
+        };
+      },
+    });
+  }
+
+  function blockExecuteEntry(reason: string, ctx: ExtensionContext) {
+    executeEntryBlockReason = reason;
+    activeProtocol = undefined;
+    state.criteriaFile = undefined;
+    state.criteriaContent = undefined;
+    state.currentIncrement = undefined;
+    state.regressionCount = 0;
+    state.commitCount = 0;
+    saveState();
+    endExploreEvidenceChain();
+    resetExecuteTracking();
+    setProtocolTools(undefined);
+    updateUI(ctx);
+    ctx.ui.notify(`Execute blocked: ${reason}`, "error");
   }
 
   function appendSubagentBatchRecord(record: PersistedSubagentBatchRecord): PersistedSubagentBatchRecordLink {
@@ -2336,9 +2387,10 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
-  function beginActiveProtocolRun(invocation: PendingProtocolInvocation | undefined, ctx: ExtensionContext) {
+  async function beginActiveProtocolRun(invocation: PendingProtocolInvocation | undefined, ctx: ExtensionContext) {
     activeProtocol = invocation?.protocol;
     pendingProtocolInvocation = undefined;
+    executeEntryBlockReason = undefined;
 
     if (activeProtocol === "explore") {
       state.debateRound = 0;
@@ -2351,7 +2403,14 @@ export default function (pi: ExtensionAPI) {
     }
 
     if (activeProtocol === "execute") {
-      state.criteriaFile = invocation?.argsText || undefined;
+      const validation = await validateExecuteCriteriaForInvocation(invocation?.argsText, ctx);
+      if (!validation.ok) {
+        blockExecuteEntry(validation.reason, ctx);
+        return;
+      }
+
+      state.criteriaFile = validation.repoRelativePath;
+      state.criteriaContent = validation.content;
       state.currentIncrement = undefined;
       state.regressionCount = 0;
       state.commitCount = 0;
@@ -2370,6 +2429,7 @@ export default function (pi: ExtensionAPI) {
   function clearActiveProtocolRun(ctx: ExtensionContext) {
     activeProtocol = undefined;
     pendingProtocolInvocation = undefined;
+    executeEntryBlockReason = undefined;
     endExploreEvidenceChain();
     setProtocolTools(undefined);
     updateUI(ctx);
@@ -2481,6 +2541,7 @@ export default function (pi: ExtensionAPI) {
     state = { acStatuses: [], regressionCount: 0, commitCount: 0 };
     activeProtocol = undefined;
     pendingProtocolInvocation = undefined;
+    executeEntryBlockReason = undefined;
     baselineActiveTools = getActiveToolNames();
     resetExploreTracking();
     resetExecuteTracking();
@@ -2645,6 +2706,27 @@ export default function (pi: ExtensionAPI) {
           targetCwd = worktreeRoot;
         }
 
+        const managedCriteriaState = activeProtocol === "execute" && state.criteriaFile && state.criteriaContent
+          ? {
+            ...state,
+            criteriaFile: state.criteriaFile,
+            criteriaContent: state.criteriaContent,
+          }
+          : undefined;
+
+        if (managedCriteriaState?.criteriaFile && managedCriteriaState.criteriaContent) {
+          try {
+            await rehydrateManagedCriteriaDocument({
+              worktreeRoot,
+              repoRelativePath: managedCriteriaState.criteriaFile,
+              content: managedCriteriaState.criteriaContent,
+            });
+          } catch (error) {
+            const reason = error instanceof Error ? error.message : String(error);
+            throw new Error(`Managed worktree criteria rehydration failed: ${reason}`);
+          }
+        }
+
         const targetSessionFile = await writeManagedSessionFile({
           cwd: targetCwd,
           sessionDir: targetSessionDir,
@@ -2653,6 +2735,9 @@ export default function (pi: ExtensionAPI) {
             ...initialLease,
             targetCwd,
           }),
+          seedEntries: managedCriteriaState
+            ? [{ customType: "cognitive-harness-state", data: managedCriteriaState }]
+            : undefined,
         });
 
         currentManagedLease = refreshManagedLease({
@@ -2877,12 +2962,21 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("before_agent_start", async (event, ctx) => {
     if (!IS_SUBAGENT_CHILD) {
-      beginActiveProtocolRun(pendingProtocolInvocation, ctx);
+      await beginActiveProtocolRun(pendingProtocolInvocation, ctx);
     }
 
     let injection = "";
 
-    if (IS_SUBAGENT_CHILD) {
+    if (!IS_SUBAGENT_CHILD && executeEntryBlockReason) {
+      injection = `
+[HARNESS EXECUTE ENTRY BLOCKED]
+The requested /execute run is blocked before execute runtime starts.
+- Do not enter planning or implementation mode.
+- Reply concisely with the exact stop reason below.
+- Ask the user to provide a valid gitignored criteria document under ${EXECUTE_CRITERIA_DIRECTORY}/.
+Stop reason: ${executeEntryBlockReason}
+`;
+    } else if (IS_SUBAGENT_CHILD) {
       if (CHILD_SUBAGENT_MODE === "explore") {
         injection = `
 [HARNESS SUBAGENT: EXPLORE CHILD PROTOCOL ACTIVE]

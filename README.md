@@ -89,12 +89,12 @@ Expected runtime shape inside pi:
 3. call `harness_subagents` with **OPT / PRA / SKP / EMP** in **parallel**
 4. research external evidence with `harness_web_search` / `harness_web_fetch`
 5. run the 3-round debate
-6. return or write a planning packet with synthesis, concrete work plan, and clarification questions
+6. return or write the planning packet under `/.target/explore/` and prepare any pre-`/execute` PRD / criteria under `/.target/criteria/`
 
 ### Execute protocol
 
 ```text
-/execute .iteration-4-criteria.md
+/execute .target/criteria/iteration-11-gitignored-temporal-doc-enforcement.md
 ```
 
 Expected runtime shape inside pi:
@@ -102,7 +102,7 @@ Expected runtime shape inside pi:
 2. call `harness_subagents` with **PLN → IMP → VER** in **sequential** mode
 3. run gates and verification
 4. update the verification registry
-5. produce the execution report at `target/execute/`
+5. produce the execution report at `/.target/execute/`
 
 ### Generic subagent runtime
 
