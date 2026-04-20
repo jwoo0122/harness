@@ -7,6 +7,9 @@ export const MANAGED_BRANCH_PREFIX = "harness/wt/";
 export const MANAGED_WORKTREE_SCHEMA = "harness-managed-worktree/v1";
 export const MANAGED_SESSION_BINDING_SCHEMA = "harness-managed-session-binding/v1";
 export const MANAGED_SESSION_BINDING_CUSTOM_TYPE = "harness-managed-worktree-binding";
+export const MANAGED_EXECUTE_RESUME_SCHEMA = "harness-managed-execute-resume/v1";
+export const MANAGED_EXECUTE_RESUME_CUSTOM_TYPE = "harness-managed-execute-resume";
+export const MANAGED_EXECUTE_RESUME_CONSUMED_CUSTOM_TYPE = "harness-managed-execute-resume-consumed";
 export const MANAGED_LEASE_DIRECTORY = "pi-harness/worktrees";
 export const INTERNAL_MANAGED_WORKTREE_COMMAND = "harness-internal-managed-worktree-create";
 export const INTERNAL_MANAGED_WORKTREE_TOOL = "harness_prepare_managed_workspace";
@@ -51,6 +54,20 @@ export interface ManagedWorktreeLease {
   createdAt: string;
   releasedAt?: string;
   missingSince?: string;
+}
+
+export interface ManagedExecuteResumeRequest {
+  schema: typeof MANAGED_EXECUTE_RESUME_SCHEMA;
+  requestId: string;
+  protocol: "execute";
+  argsText: string;
+  createdAt: string;
+  sourceSessionFile?: string;
+}
+
+export interface ManagedSessionCustomEntry {
+  customType: string;
+  data?: unknown;
 }
 
 export interface GitWorktreeRecord {
@@ -101,6 +118,7 @@ export interface ManagedSessionFileOptions {
   sessionDir: string;
   parentSession?: string;
   binding?: ManagedSessionBinding;
+  customEntries?: ManagedSessionCustomEntry[];
   now?: Date;
 }
 
@@ -363,6 +381,61 @@ export function createManagedSessionFileName(now = new Date(), sessionId = rando
   return `${formatTimestampForFile(now)}_${sessionId}.jsonl`;
 }
 
+export function createManagedExecuteResumeRequest(
+  argsText: string,
+  options?: { sourceSessionFile?: string; requestId?: string; now?: Date },
+): ManagedExecuteResumeRequest {
+  const now = options?.now ?? new Date();
+  return {
+    schema: MANAGED_EXECUTE_RESUME_SCHEMA,
+    requestId: options?.requestId ?? randomUUID(),
+    protocol: "execute",
+    argsText: argsText.trim(),
+    createdAt: now.toISOString(),
+    sourceSessionFile: options?.sourceSessionFile ? normalizeAbsolutePath(options.sourceSessionFile) : undefined,
+  };
+}
+
+export function buildManagedExecuteResumeCommand(request: ManagedExecuteResumeRequest): string {
+  return request.argsText ? `/execute ${request.argsText}` : "/execute";
+}
+
+export function isManagedExecuteResumeRequest(value: unknown): value is ManagedExecuteResumeRequest {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Record<string, unknown>;
+  return candidate.schema === MANAGED_EXECUTE_RESUME_SCHEMA
+    && candidate.protocol === "execute"
+    && typeof candidate.requestId === "string"
+    && typeof candidate.argsText === "string"
+    && typeof candidate.createdAt === "string";
+}
+
+export function readPendingManagedExecuteResume(
+  entries: Array<{ type: string; customType?: string; data?: unknown }>,
+): ManagedExecuteResumeRequest | undefined {
+  const consumedIds = new Set<string>();
+  let latestPending: ManagedExecuteResumeRequest | undefined;
+
+  for (const entry of entries) {
+    if (entry.type !== "custom") continue;
+
+    if (entry.customType === MANAGED_EXECUTE_RESUME_CONSUMED_CUSTOM_TYPE) {
+      const requestId = typeof (entry.data as { requestId?: unknown } | undefined)?.requestId === "string"
+        ? (entry.data as { requestId: string }).requestId
+        : undefined;
+      if (requestId) consumedIds.add(requestId);
+      continue;
+    }
+
+    if (entry.customType === MANAGED_EXECUTE_RESUME_CUSTOM_TYPE && isManagedExecuteResumeRequest(entry.data)) {
+      latestPending = entry.data;
+    }
+  }
+
+  if (!latestPending) return undefined;
+  return consumedIds.has(latestPending.requestId) ? undefined : latestPending;
+}
+
 export async function writeManagedSessionFile(options: ManagedSessionFileOptions): Promise<string> {
   const now = options.now ?? new Date();
   const sessionId = randomUUID();
@@ -378,15 +451,32 @@ export async function writeManagedSessionFile(options: ManagedSessionFileOptions
   };
 
   const entries: any[] = [header];
+  let parentId: string | null = null;
+
   if (options.binding) {
+    const bindingEntryId = createShortEntryId();
     entries.push({
       type: "custom",
-      id: createShortEntryId(),
-      parentId: null,
+      id: bindingEntryId,
+      parentId,
       timestamp: now.toISOString(),
       customType: MANAGED_SESSION_BINDING_CUSTOM_TYPE,
       data: options.binding,
     });
+    parentId = bindingEntryId;
+  }
+
+  for (const customEntry of options.customEntries ?? []) {
+    const entryId = createShortEntryId();
+    entries.push({
+      type: "custom",
+      id: entryId,
+      parentId,
+      timestamp: now.toISOString(),
+      customType: customEntry.customType,
+      data: customEntry.data,
+    });
+    parentId = entryId;
   }
 
   await mkdir(sessionDir, { recursive: true });

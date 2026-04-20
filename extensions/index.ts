@@ -14,17 +14,29 @@ import { classifyChildBashCommand, classifyExploreBash, isAgentBrowserCommand } 
 import { registerCompactBuiltinToolRenderers } from "./compact-tool-renderers.js";
 import { evaluateExploreEvidenceGate } from "./explore-gate.js";
 import {
+  buildManagedExecuteBootstrapCommand,
+  decideManagedExecuteStartup,
+  decodeManagedWorktreeBootstrapRequest,
+  evaluateDirtyExecuteBootstrap,
+  planManagedExecuteResume,
+  type ManagedWorktreeBootstrapRequest,
+} from "./execute-managed-bootstrap.js";
+import {
   type HarnessProtocol,
   parseHarnessProtocolInvocation,
   stripLegacyHarnessMode,
 } from "./protocol-invocation.js";
 import {
+  type ManagedExecuteResumeRequest,
   type ManagedSessionBinding,
   type ManagedWorktreeLease,
   INTERNAL_MANAGED_WORKTREE_COMMAND,
   INTERNAL_MANAGED_WORKTREE_TOOL,
+  MANAGED_EXECUTE_RESUME_CONSUMED_CUSTOM_TYPE,
+  MANAGED_EXECUTE_RESUME_CUSTOM_TYPE,
   DEFAULT_MANAGED_LEASE_TTL_MS,
   buildManagedBranchName,
+  createManagedExecuteResumeRequest,
   createManagedSessionBinding,
   createManagedWorktreeId,
   createManagedWorktreeLease,
@@ -39,6 +51,7 @@ import {
   parseGitWorktreeList,
   readManagedSessionBinding,
   readManagedWorktreeLease,
+  readPendingManagedExecuteResume,
   refreshManagedLease,
   resolveCanonicalRepoRoot,
   resolveGitCommonDir,
@@ -2155,6 +2168,12 @@ export default function (pi: ExtensionAPI) {
     });
   }
 
+  async function shouldReuseManagedExecuteWorkspace(ctx: ExtensionContext): Promise<boolean> {
+    if (!currentManagedBinding) return false;
+    const gate = await evaluateCurrentManagedMutation(ctx, true);
+    return gate.allowed;
+  }
+
   function buildManagedSubagentEnv(): Record<string, string> | undefined {
     if (!currentManagedBinding) return undefined;
     return {
@@ -2454,23 +2473,61 @@ export default function (pi: ExtensionAPI) {
       await runManagedWorktreeJanitor(ctx, janitorRepo.gitCommonDir, currentManagedBinding?.worktreeId);
     }
 
+    const pendingExecuteResume = readPendingManagedExecuteResume(
+      ctx.sessionManager.getEntries() as Array<{ type: string; customType?: string; data?: unknown }>,
+    );
+    const executeResumePlan = planManagedExecuteResume({
+      pendingResume: pendingExecuteResume,
+      currentManagedWorktreeId: currentManagedBinding?.worktreeId,
+      leaseLifecycleState: currentManagedLease?.lifecycleState,
+    });
+    if (executeResumePlan.action === "resume") {
+      pi.appendEntry(MANAGED_EXECUTE_RESUME_CONSUMED_CUSTOM_TYPE, { requestId: executeResumePlan.consumedRequestId });
+      ctx.ui.notify(executeResumePlan.notification ?? "Resuming /execute.", "info");
+      pi.sendUserMessage(executeResumePlan.commandText ?? "/execute");
+    } else if (executeResumePlan.action === "warn") {
+      ctx.ui.notify(executeResumePlan.notification ?? "Cannot resume /execute automatically.", "warning");
+    }
+
     setProtocolTools(undefined);
     updateUI(ctx);
   });
 
   // ── Protocol invocation routing ───────────────────────────────────
 
-  pi.on("input", async (event) => {
-    if (IS_SUBAGENT_CHILD || event.source === "extension") {
+  pi.on("input", async (event, ctx) => {
+    if (IS_SUBAGENT_CHILD) {
       return { action: "continue" };
     }
 
     const invocation = parseHarnessProtocolInvocation(event.text);
-    pendingProtocolInvocation = invocation
-      ? { protocol: invocation.protocol, argsText: invocation.argsText }
-      : undefined;
+    if (!invocation) {
+      pendingProtocolInvocation = undefined;
+      return { action: "continue" };
+    }
 
-    if (!invocation?.rewrittenText) {
+    if (invocation.protocol === "execute") {
+      const reuseManagedWorkspace = await shouldReuseManagedExecuteWorkspace(ctx);
+      const startupDecision = decideManagedExecuteStartup({
+        argsText: invocation.argsText,
+        reuseManagedWorkspace,
+        currentManagedWorktreeId: currentManagedBinding?.worktreeId,
+        commandName: INTERNAL_MANAGED_WORKTREE_COMMAND,
+      });
+
+      pendingProtocolInvocation = startupDecision.preservePendingInvocation
+        ? { protocol: invocation.protocol, argsText: invocation.argsText }
+        : undefined;
+      ctx.ui.notify(startupDecision.notification, "info");
+      return {
+        action: "transform",
+        text: startupDecision.transformedText,
+      };
+    }
+
+    pendingProtocolInvocation = { protocol: invocation.protocol, argsText: invocation.argsText };
+
+    if (!invocation.rewrittenText) {
       return { action: "continue" };
     }
 
@@ -2519,16 +2576,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand(INTERNAL_MANAGED_WORKTREE_COMMAND, {
     description: "[internal] Create a managed worktree and switch into its session",
     handler: async (args, ctx) => {
-      let request: { headOnlyFromDirty?: boolean } = {};
-      const trimmedArgs = args.trim();
-      if (trimmedArgs) {
-        try {
-          request = JSON.parse(Buffer.from(trimmedArgs, "base64url").toString("utf-8"));
-        } catch {
-          ctx.ui.notify("Managed worktree bootstrap arguments were invalid.", "error");
-          return;
-        }
-      }
+      const request: ManagedWorktreeBootstrapRequest = decodeManagedWorktreeBootstrapRequest(args.trim());
 
       let repoContext;
       try {
@@ -2550,13 +2598,28 @@ export default function (pi: ExtensionAPI) {
       }
 
       const hasDirtyChanges = hasRelevantGitStatusChanges(statusResult.stdout, repoContext.repoRoot, ignoredStatusPaths);
-      if (hasDirtyChanges && !request.headOnlyFromDirty) {
+      let dirtyDecision = evaluateDirtyExecuteBootstrap({
+        hasDirtyChanges,
+        headOnlyFromDirty: request.headOnlyFromDirty,
+      });
+      if (dirtyDecision.action === "confirm") {
+        const confirmed = ctx.hasUI && dirtyDecision.title && dirtyDecision.message
+          ? await ctx.ui.confirm(dirtyDecision.title, dirtyDecision.message)
+          : false;
+        dirtyDecision = evaluateDirtyExecuteBootstrap({
+          hasDirtyChanges,
+          headOnlyFromDirty: request.headOnlyFromDirty,
+          confirmed,
+        });
+      }
+      if (dirtyDecision.action === "cancel") {
         ctx.ui.notify(
-          "Managed worktree bootstrap cancelled: the current checkout is dirty, and uncommitted changes are not carried into the new worktree. Re-run with explicit HEAD-only confirmation.",
+          dirtyDecision.notification ?? "Managed worktree bootstrap cancelled.",
           "warning",
         );
         return;
       }
+      request.headOnlyFromDirty = dirtyDecision.headOnlyFromDirty;
 
       const worktreeId = createManagedWorktreeId();
       const branch = buildManagedBranchName(worktreeId);
@@ -2586,6 +2649,12 @@ export default function (pi: ExtensionAPI) {
           targetCwd = worktreeRoot;
         }
 
+        const executeResumeRequest = request.resumeExecuteArgsText !== undefined
+          ? createManagedExecuteResumeRequest(request.resumeExecuteArgsText, {
+              sourceSessionFile: ctx.sessionManager.getSessionFile(),
+            })
+          : undefined;
+
         const targetSessionFile = await writeManagedSessionFile({
           cwd: targetCwd,
           sessionDir: targetSessionDir,
@@ -2594,6 +2663,9 @@ export default function (pi: ExtensionAPI) {
             ...initialLease,
             targetCwd,
           }),
+          customEntries: executeResumeRequest
+            ? [{ customType: MANAGED_EXECUTE_RESUME_CUSTOM_TYPE, data: executeResumeRequest }]
+            : undefined,
         });
 
         currentManagedLease = refreshManagedLease({
