@@ -5,12 +5,16 @@
 ### Added
 - `EMP` as a first-class `/explore` persona alongside `OPT / PRA / SKP`
 - flat `agents/` directory with one Markdown prompt body per shipped subagent (`OPT`, `PRA`, `SKP`, `EMP`, `PLN`, `IMP`, `VER`)
+- `harness_verify_run` as an execute-mode tool for running automated verification specs and appending immutable receipts
 
 ### Changed
 - the extension now loads canonical explore/execute subagent prompt bodies from `agents/*.md`
 - prompt loading and explore/execute prompt builders have been extracted from `extensions/index.ts` into `extensions/agent-prompts.ts`
 - bash-policy classification helpers have been extracted from `extensions/index.ts` into `extensions/bash-policy.ts`
 - verification registry storage types and file I/O have been extracted from `extensions/index.ts` into `extensions/verification-registry.ts`
+- verification accumulation now uses a split authority model: committed reusable specs in `.harness/verification-registry.json` plus repo-shared immutable runtime receipts under the git common dir
+- `harness_verify_register` now records reusable specs instead of stamping authoritative pass/fail state
+- `harness_verify_list` now reports receipt-derived `pass` / `fail` / `missing` / `stale` status
 - live subagent progress no longer renders in a separate widget; it now stays inside the subagent tool call with one line per subagent
 - `/explore`, docs, and prompt templates now reference the four-persona debate shape
 - `/explore` and `/execute` are now one-shot protocol runs instead of persistent mode switches; the extension routes skill invocations without changing long-lived agent mode state
