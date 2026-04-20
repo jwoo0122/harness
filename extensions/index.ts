@@ -19,6 +19,11 @@ import {
   stripLegacyHarnessMode,
 } from "./protocol-invocation.js";
 import {
+  deriveManagedWorktreePresentation,
+  renderManagedWorktreeStatusText,
+  renderManagedWorktreeWidgetLines,
+} from "./managed-worktree-presentation.js";
+import {
   type ManagedSessionBinding,
   type ManagedWorktreeLease,
   INTERNAL_MANAGED_WORKTREE_COMMAND,
@@ -2092,10 +2097,19 @@ export default function (pi: ExtensionAPI) {
     return pi.exec("git", args, { signal, timeout });
   }
 
-  function getManagedStatusSummary(): string | undefined {
-    if (!currentManagedBinding) return undefined;
-    const stateLabel = currentManagedLease?.lifecycleState ?? "binding-only";
-    return `${currentManagedBinding.worktreeId} · ${stateLabel}`;
+  function getManagedPresentation(cwd: string) {
+    return deriveManagedWorktreePresentation({
+      binding: currentManagedBinding,
+      lease: currentManagedLease,
+      cwd,
+      worktreePathExists: currentManagedBinding
+        ? existsSync(currentManagedBinding.worktreePath)
+        : undefined,
+    });
+  }
+
+  function getManagedStatusSummary(cwd: string): string | undefined {
+    return renderManagedWorktreeStatusText(getManagedPresentation(cwd));
   }
 
   async function getGitRepoContext(cwd: string, signal?: AbortSignal) {
@@ -2317,14 +2331,42 @@ export default function (pi: ExtensionAPI) {
   function updateUI(ctx: ExtensionContext) {
     if (IS_SUBAGENT_CHILD || !ctx.hasUI) return;
 
-    ctx.ui.setWidget("harness", undefined);
+    const presentation = getManagedPresentation(ctx.cwd);
+    const widgetLines = renderManagedWorktreeWidgetLines(presentation);
+    const managedStatus = getManagedStatusSummary(ctx.cwd);
 
-    if (getManagedStatusSummary()) {
-      ctx.ui.setStatus("harness", `🧱 WT ${getManagedStatusSummary()}`);
+    ctx.ui.setWidget("harness", undefined);
+    ctx.ui.setStatus("harness", undefined);
+
+    if (widgetLines) {
+      ctx.ui.setWidget("harness", widgetLines, { placement: "belowEditor" });
+    }
+
+    if (activeProtocol === "explore") {
+      const managedSuffix = managedStatus ? ` 🧱${managedStatus}` : "";
+      ctx.ui.setStatus(
+        "harness",
+        `🧠 EXPLORE 🤖${exploreTotals.subagentRuns} 🔎${exploreTotals.searches} 🌐${exploreTotals.fetches} 🔗${exploreTotals.sources.size}${managedSuffix}`,
+      );
       return;
     }
 
-    ctx.ui.setStatus("harness", undefined);
+    if (activeProtocol === "execute") {
+      const passed = state.acStatuses.filter((a) => a.status === "pass").length;
+      const failed = state.acStatuses.filter((a) => a.status === "fail").length;
+      const pending = state.acStatuses.filter((a) => a.status === "pending").length;
+      const managedSuffix = managedStatus ? ` 🧱${managedStatus}` : "";
+
+      ctx.ui.setStatus(
+        "harness",
+        `⚙️ EXECUTE 🤖${executeTotals.subagentRuns} ✅${passed} ❌${failed} ⏳${pending} 📦${state.commitCount}${managedSuffix}`,
+      );
+      return;
+    }
+
+    if (managedStatus) {
+      ctx.ui.setStatus("harness", `🧱 WT ${managedStatus}`);
+    }
   }
 
   function endExploreEvidenceChain() {
@@ -2653,6 +2695,8 @@ export default function (pi: ExtensionAPI) {
     if (!IS_SUBAGENT_CHILD && currentManagedLease?.lifecycleState === "managed-active") {
       await refreshManagedLeaseHeartbeat();
     }
+
+    updateUI(ctx);
 
     if (!isExploreRuntime() || !exploreChain.active) return;
 

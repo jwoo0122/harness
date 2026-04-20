@@ -30,7 +30,7 @@ for (const marker of [
   'Managed branch:',
   'Managed path:',
   'Managed state:',
-  'ctx.ui.setStatus("harness", `🧱 WT ${getManagedStatusSummary()}`);',
+  'ctx.ui.setStatus("harness", `🧱 WT ${managedStatus}`);',
 ]) {
   assert.ok(indexSource.includes(marker), `extensions/index.ts missing lifecycle marker: ${marker}`);
 }

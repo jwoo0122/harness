@@ -33,23 +33,24 @@ for (const forbiddenImport of ["./index", "@mariozechner/", "@sinclair/typebox"]
 assert.ok(indexSource.includes('from "./explore-gate.js"'), "extensions/index.ts must import ./explore-gate.js");
 assert.ok(indexSource.includes('pi.on("turn_end"'), "extensions/index.ts must enforce explore gating in turn_end");
 assert.ok(indexSource.includes('deliverAs: "steer"'), "extensions/index.ts must steer explore retries before completion");
-assert.ok(indexSource.includes('ctx.ui.setWidget("harness", undefined);'), "updateUI must clear the removed harness widget surface");
+assert.ok(indexSource.includes('ctx.ui.setWidget("harness", undefined);'), "updateUI must clear stale harness widget state before rerendering managed identity UI");
+assert.ok(
+  indexSource.includes('ctx.ui.setWidget("harness", widgetLines, { placement: "belowEditor" });'),
+  "updateUI may render the managed-worktree identity widget below the editor",
+);
 assert.equal(
   (indexSource.match(/setWidget\("harness"/g) ?? []).length,
-  1,
-  "extensions/index.ts should only touch the harness widget to clear it",
+  2,
+  "extensions/index.ts should only clear and rerender the managed harness widget surface",
 );
 assert.ok(
-  indexSource.includes('ctx.ui.setStatus("harness", `🧱 WT ${getManagedStatusSummary()}`);'),
+  indexSource.includes('ctx.ui.setStatus("harness", `🧱 WT ${managedStatus}`);'),
   "updateUI must retain the managed worktree status path",
 );
 assert.ok(
   indexSource.includes('ctx.ui.setStatus("harness", undefined);'),
   "updateUI must clear harness status when no managed worktree is bound",
 );
-for (const removedStatusCopy of ["🧠 EXPLORE", "⚙️ EXECUTE"]) {
-  assert.ok(!indexSource.includes(removedStatusCopy), `extensions/index.ts must not restore removed protocol status copy: ${removedStatusCopy}`);
-}
 assert.ok(
   !indexSource.includes('pi.sendUserMessage("/skill:explore') && !indexSource.includes('pi.sendUserMessage("/skill:execute'),
   "extensions/index.ts should no longer dispatch /skill:explore or /skill:execute followUps",
