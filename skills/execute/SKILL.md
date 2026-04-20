@@ -1,14 +1,14 @@
 ---
 name: execute
 description: "Agile execution protocol with 3-role mutual verification (Planner / Implementer / Verifier). No role evaluates its own output. Micro-increment implementation with regression suppression. Triggers: 'execute', 'implement', 'build it', 'start iteration', 'ship it'. Works in any harness; gains state tracking in pi."
-argument-hint: "[criteria-file or milestone name]"
+argument-hint: "[/.target/criteria/<criteria-file>.md]"
 ---
 
 # Execute — Agile Execution Harness
 
 You are now running the **convergent execute protocol** with a **three-role agent system**.
 
-Arguments: $ARGUMENTS — path to criteria/requirements file, or milestone name. If blank, look for the most recent criteria/requirements document in the project.
+Arguments: $ARGUMENTS — path to a temporary gitignored criteria / PRD file under `/.target/criteria/`. Blank or non-canonical inputs should be treated as blocked.
 
 > **Harness note:** This skill is project-agnostic. When running inside pi with the `@jwoo0122/harness` extension, AC status is persisted across sessions, the parent `/execute` agent becomes an orchestrator, and real isolated subagents should be invoked through the generic `harness_subagents` tool instead of role-playing every function in one context. PLN / IMP / VER are injected by this skill as role-specific subagent configurations. In the package extension, the canonical prompt bodies for those roles live in the flat `agents/` directory.
 
@@ -371,7 +371,7 @@ git push
 
 ### Phase 3 — Completion Report (PLN writes, VER audits)
 
-Write to `target/execute/<name>-<YYYYMMDD-HHMMSS>.md`:
+Write to `/.target/execute/<name>-<YYYYMMDD-HHMMSS>.md`:
 
 ```markdown
 # Execution Report: [milestone]

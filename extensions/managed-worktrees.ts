@@ -96,11 +96,17 @@ export interface ManagedJanitorDecision {
   nextState?: ManagedWorkspaceLifecycleState;
 }
 
+export interface ManagedSessionSeedEntry {
+  customType: string;
+  data: unknown;
+}
+
 export interface ManagedSessionFileOptions {
   cwd: string;
   sessionDir: string;
   parentSession?: string;
   binding?: ManagedSessionBinding;
+  seedEntries?: ManagedSessionSeedEntry[];
   now?: Date;
 }
 
@@ -386,6 +392,17 @@ export async function writeManagedSessionFile(options: ManagedSessionFileOptions
       timestamp: now.toISOString(),
       customType: MANAGED_SESSION_BINDING_CUSTOM_TYPE,
       data: options.binding,
+    });
+  }
+
+  for (const entry of options.seedEntries ?? []) {
+    entries.push({
+      type: "custom",
+      id: createShortEntryId(),
+      parentId: null,
+      timestamp: now.toISOString(),
+      customType: entry.customType,
+      data: entry.data,
     });
   }
 
