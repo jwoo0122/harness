@@ -193,6 +193,221 @@
         "description": "Validation chain syntax-checks the new explore-gate module and executes deterministic source/behavior checks for parent and child gating plus generic explore child-mode propagation."
       }
     },
+    "AC-9.1": {
+      "check_id": "AC-9.1",
+      "bindings": [
+        {
+          "binding_id": "AC-9.1",
+          "requirement": "Managed worktree identity is explicit, deterministic, and stored in repo-shared git-common-dir metadata.",
+          "source": ".iteration-9-criteria.md",
+          "registeredAt": "INC-1"
+        }
+      ],
+      "verification": {
+        "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
+        "command": "npm run validate:extensions",
+        "files": [
+          "extensions/index.ts",
+          "extensions/managed-worktrees.ts",
+          "package.json",
+          "tests/extensions/validate-managed-worktrees.mjs"
+        ],
+        "description": "Validation chain syntax-checks the managed-worktrees seam and runs temp-repo assertions for deterministic managed IDs, branch prefixes, worktree roots, and git-common-dir lease paths."
+      }
+    },
+    "AC-9.2": {
+      "check_id": "AC-9.2",
+      "bindings": [
+        {
+          "binding_id": "AC-9.2",
+          "requirement": "A non-user-facing managed-worktree creation entrypoint exists for orchestration/tests and switches into the managed workspace without exposing a public slash-command workflow.",
+          "source": ".iteration-9-criteria.md",
+          "registeredAt": "INC-1"
+        }
+      ],
+      "verification": {
+        "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
+        "command": "npm run validate:extensions",
+        "files": [
+          "extensions/index.ts",
+          "extensions/managed-worktrees.ts",
+          "package.json",
+          "README.md",
+          "skills/execute/SKILL.md",
+          "tests/extensions/validate-managed-worktree-bootstrap.mjs"
+        ],
+        "description": "Validation chain confirms the internal managed-worktree bootstrap command/tool wiring, keeps the workflow non-public in docs, and exercises temp-repo bootstrap behavior."
+      }
+    },
+    "AC-9.3": {
+      "check_id": "AC-9.3",
+      "bindings": [
+        {
+          "binding_id": "AC-9.3",
+          "requirement": "Dirty-state preflight prevents silent carryover of local edits into a new managed worktree.",
+          "source": ".iteration-9-criteria.md",
+          "registeredAt": "INC-1"
+        }
+      ],
+      "verification": {
+        "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
+        "command": "npm run validate:extensions",
+        "files": [
+          "extensions/index.ts",
+          "tests/extensions/validate-managed-worktree-bootstrap.mjs"
+        ],
+        "description": "Validation chain confirms dirty-repo preflight messaging and the explicit HEAD-only confirmation path for managed-worktree bootstrap."
+      }
+    },
+    "AC-9.4": {
+      "check_id": "AC-9.4",
+      "bindings": [
+        {
+          "binding_id": "AC-9.4",
+          "requirement": "Managed bootstrap creates a persisted target-cwd session file before switching and resolves relative sessionDir against the target worktree.",
+          "source": ".iteration-9-criteria.md",
+          "registeredAt": "INC-1"
+        }
+      ],
+      "verification": {
+        "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
+        "command": "npm run validate:extensions",
+        "files": [
+          "extensions/index.ts",
+          "extensions/managed-worktrees.ts",
+          "tests/extensions/validate-managed-worktree-bootstrap.mjs"
+        ],
+        "description": "Validation chain confirms target session-file creation, target-cwd header persistence, absolute switch paths, and relative sessionDir resolution under the target worktree root."
+      }
+    },
+    "AC-9.5": {
+      "check_id": "AC-9.5",
+      "bindings": [
+        {
+          "binding_id": "AC-9.5",
+          "requirement": "Session-to-worktree association survives restart and resume, and missing worktree paths fail explicitly while status surfaces the managed identity.",
+          "source": ".iteration-9-criteria.md",
+          "registeredAt": "INC-1"
+        }
+      ],
+      "verification": {
+        "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
+        "command": "npm run validate:extensions",
+        "files": [
+          "extensions/index.ts",
+          "extensions/managed-worktrees.ts",
+          "tests/extensions/validate-managed-worktree-lifecycle.mjs"
+        ],
+        "description": "Validation chain confirms binding round-trip through the session file, lease activation/release/missing transitions, and managed status surfacing in harness UI/status paths."
+      }
+    },
+    "AC-9.6": {
+      "check_id": "AC-9.6",
+      "bindings": [
+        {
+          "binding_id": "AC-9.6",
+          "requirement": "Managed worktrees use an explicit deterministic lifecycle state model with shared lease records stored under the git common dir.",
+          "source": ".iteration-9-criteria.md",
+          "registeredAt": "INC-1"
+        }
+      ],
+      "verification": {
+        "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
+        "command": "npm run validate:extensions",
+        "files": [
+          "extensions/index.ts",
+          "extensions/managed-worktrees.ts",
+          "tests/extensions/validate-managed-worktree-lifecycle.mjs",
+          "tests/extensions/validate-managed-worktrees.mjs"
+        ],
+        "description": "Validation chain confirms the managed lifecycle state model, shared lease persistence under git-common-dir storage, and deterministic activation/release/missing transitions."
+      }
+    },
+    "AC-9.7": {
+      "check_id": "AC-9.7",
+      "bindings": [
+        {
+          "binding_id": "AC-9.7",
+          "requirement": "An authoritative mutation gate blocks harness-controlled mutation outside a valid managed-worktree binding, including execute child subagents and harness_commit.",
+          "source": ".iteration-9-criteria.md",
+          "registeredAt": "INC-1"
+        }
+      ],
+      "verification": {
+        "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
+        "command": "npm run validate:extensions",
+        "files": [
+          "extensions/index.ts",
+          "extensions/managed-worktrees.ts",
+          "extensions/subagents.ts",
+          "tests/extensions/validate-managed-mutation-gate.mjs"
+        ],
+        "description": "Validation chain confirms parent and child managed mutation gating, child env propagation, cwd/branch/lease checks, and harness_commit coverage under the same binding discipline."
+      }
+    },
+    "AC-9.8": {
+      "check_id": "AC-9.8",
+      "bindings": [
+        {
+          "binding_id": "AC-9.8",
+          "requirement": "Inline janitor safely prunes only disposable managed worktrees and never removes non-managed worktrees.",
+          "source": ".iteration-9-criteria.md",
+          "registeredAt": "INC-1"
+        }
+      ],
+      "verification": {
+        "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
+        "command": "npm run validate:extensions",
+        "files": [
+          "extensions/index.ts",
+          "extensions/managed-worktrees.ts",
+          "tests/extensions/validate-managed-worktree-janitor.mjs"
+        ],
+        "description": "Validation chain confirms janitor startup/bootstrap wiring, temp-repo worktree discovery, clean-expired-non-diverged removal rules, and protection for dirty/diverged or user-created worktrees."
+      }
+    },
+    "AC-9.9": {
+      "check_id": "AC-9.9",
+      "bindings": [
+        {
+          "binding_id": "AC-9.9",
+          "requirement": "Validation deterministically covers the managed-worktree core, including lifecycle, bootstrap, mutation gate, janitor safety, and unchanged built-in /new behavior.",
+          "source": ".iteration-9-criteria.md",
+          "registeredAt": "INC-1"
+        }
+      ],
+      "verification": {
+        "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
+        "command": "npm run validate:extensions",
+        "files": [
+          "package.json",
+          "tests/extensions/validate-managed-mutation-gate.mjs",
+          "tests/extensions/validate-managed-worktree-bootstrap.mjs",
+          "tests/extensions/validate-managed-worktree-janitor.mjs",
+          "tests/extensions/validate-managed-worktree-lifecycle.mjs",
+          "tests/extensions/validate-managed-worktrees.mjs"
+        ],
+        "description": "Validation chain syntax-checks the new managed-worktrees seam and runs deterministic validators covering bootstrap, lifecycle, mutation gate, janitor safety, and public-surface constraints for Iteration 9."
+      }
+    },
     "AC-SMOKE-1": {
       "check_id": "AC-SMOKE-1",
       "bindings": [

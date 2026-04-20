@@ -54,7 +54,6 @@ This gives you:
 - structured web evidence tools for auditable external research
 - pre-completion explore evidence gating via turn-end steering
 - verification registry tools for cumulative AC verification
-- footer status for the active protocol run and counters
 - no separate live subagent widget; live subagent progress stays inside the tool call row
 - compact text-first tool rows for built-ins + harness tools (minimal/no output when collapsed, no colored tool box background)
 - state persistence across session restarts
@@ -74,7 +73,7 @@ If you publish the package to npm, the same skills can also be consumed that way
 npm install @jwoo0122/harness
 ```
 
-The Markdown skills work standalone without the pi extension. You lose enforcement, live UI, and persistent state, but the debate / verification protocols still work.
+The Markdown skills work standalone without the pi extension. You lose enforcement and persistent state, but the debate / verification protocols still work.
 
 ## Usage
 
@@ -154,7 +153,7 @@ harness/
 │   ├── bash-policy.ts           # explore/execute bash classification helpers
 │   ├── explore-gate.ts          # pure explore evidence gate assessment helpers
 │   ├── verification-registry.ts # registry storage model + file I/O
-│   ├── index.ts                 # extension composition root, protocol routing, gating, tools, registry, status UI
+│   ├── index.ts                 # extension composition root, protocol routing, gating, tools, registry, runtime state
 │   └── subagents.ts             # generic isolated subprocess runtime
 ├── prompts/
 │   ├── debate.md
@@ -193,9 +192,8 @@ New integrations should prefer `harness_subagents`.
 
 ### 4. TUI behavior is now simpler
 
-- footer status appears only for the active protocol run
-- there is no separate subagent widget; live progress is rendered inside the subagent tool call itself
-- there is no always-on harness dashboard widget anymore
+- live subagent progress is rendered inside the subagent tool call itself
+- there is no separate subagent widget or always-on harness dashboard widget anymore
 
 ### 5. Verification accumulation stays cumulative
 

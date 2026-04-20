@@ -3,6 +3,7 @@ import { isToolCallEventType } from "@mariozechner/pi-coding-agent";
 import { Container, Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { createHash, randomBytes } from "node:crypto";
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
   buildExecuteRoleSystemPrompt,
@@ -18,6 +19,37 @@ import {
   parseHarnessProtocolInvocation,
   stripLegacyHarnessMode,
 } from "./protocol-invocation.js";
+import {
+  type ManagedSessionBinding,
+  type ManagedWorktreeLease,
+  INTERNAL_MANAGED_WORKTREE_COMMAND,
+  INTERNAL_MANAGED_WORKTREE_TOOL,
+  DEFAULT_MANAGED_LEASE_TTL_MS,
+  buildManagedBranchName,
+  createManagedSessionBinding,
+  createManagedWorktreeId,
+  createManagedWorktreeLease,
+  deleteManagedWorktreeLease,
+  evaluateManagedJanitorDecision,
+  evaluateManagedMutationGate,
+  findGitWorktreeRecord,
+  hasRelevantGitStatusChanges,
+  isManagedSessionBinding,
+  isPathInside,
+  listManagedWorktreeLeaseFiles,
+  parseGitWorktreeList,
+  readManagedSessionBinding,
+  readManagedWorktreeLease,
+  refreshManagedLease,
+  resolveCanonicalRepoRoot,
+  resolveGitCommonDir,
+  resolveManagedTargetCwd,
+  resolveManagedWorktreeRoot,
+  resolveSessionDirForCwd,
+  resolveTargetSessionDir,
+  writeManagedSessionFile,
+  writeManagedWorktreeLease,
+} from "./managed-worktrees.js";
 import {
   appendVerificationReceipt,
   deriveVerificationStatuses,
@@ -227,6 +259,16 @@ interface WebSearchResult {
   source: string;
 }
 
+function decodeManagedBindingFromEnv(rawValue: string | undefined): ManagedSessionBinding | undefined {
+  if (!rawValue) return undefined;
+  try {
+    const parsed = JSON.parse(Buffer.from(rawValue, "base64url").toString("utf-8"));
+    return isManagedSessionBinding(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 // ─── Verification Accumulation ───────────────────────────────────────
 
 const CURRENT_EXTENSION_PATH = fileURLToPath(import.meta.url);
@@ -238,6 +280,8 @@ const CHILD_SUBAGENT_TOOLS = (process.env.HARNESS_SUBAGENT_TOOLS ?? "")
   .map((tool) => tool.trim())
   .filter(Boolean);
 const CHILD_SUBAGENT_BASH_POLICY = (process.env.HARNESS_SUBAGENT_BASH_POLICY ?? "none") as SubagentBashPolicy;
+const CHILD_MANAGED_WORKTREE_REQUIRED = process.env.HARNESS_MANAGED_WORKTREE_REQUIRED === "1";
+const CHILD_MANAGED_WORKTREE_BINDING = decodeManagedBindingFromEnv(process.env.HARNESS_MANAGED_WORKTREE_BINDING);
 const SAFE_EXPLORE_TOOL_NAMES = new Set([
   "read",
   "bash",
@@ -258,6 +302,7 @@ const SAFE_EXECUTE_TOOL_NAMES = new Set([
   "harness_web_fetch",
   "harness_subagents",
   "harness_execute_subagents",
+  INTERNAL_MANAGED_WORKTREE_TOOL,
   "harness_verify_register",
   "harness_verify_run",
   "harness_verify_list",
@@ -1928,6 +1973,8 @@ export default function (pi: ExtensionAPI) {
   let exploreTotals = createExploreEvidenceTotals();
   let exploreChain = createExploreEvidenceChain();
   let executeTotals = createExecuteSubagentTotals();
+  let currentManagedBinding: ManagedSessionBinding | undefined;
+  let currentManagedLease: ManagedWorktreeLease | undefined;
 
   function getRuntimeProtocol(): HarnessProtocol | "generic" {
     if (IS_SUBAGENT_CHILD) {
@@ -2088,6 +2135,193 @@ export default function (pi: ExtensionAPI) {
     pi.setActiveTools([...target].filter((name) => all.has(name)));
   }
 
+  async function execGit(args: string[], timeout = 10_000, signal?: AbortSignal) {
+    return pi.exec("git", args, { signal, timeout });
+  }
+
+  function getManagedStatusSummary(): string | undefined {
+    if (!currentManagedBinding) return undefined;
+    const stateLabel = currentManagedLease?.lifecycleState ?? "binding-only";
+    return `${currentManagedBinding.worktreeId} · ${stateLabel}`;
+  }
+
+  async function getGitRepoContext(cwd: string, signal?: AbortSignal) {
+    const repoRootResult = await execGit(["-C", cwd, "rev-parse", "--show-toplevel"], 10_000, signal);
+    if (repoRootResult.code !== 0) {
+      throw new Error("Managed worktrees require a git repository.");
+    }
+
+    let gitCommonDirResult = await execGit(["-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"], 10_000, signal);
+    if (gitCommonDirResult.code !== 0) {
+      gitCommonDirResult = await execGit(["-C", cwd, "rev-parse", "--git-common-dir"], 10_000, signal);
+    }
+    if (gitCommonDirResult.code !== 0) {
+      throw new Error(gitCommonDirResult.stderr.trim() || "Failed to resolve git common dir.");
+    }
+
+    const headResult = await execGit(["-C", cwd, "rev-parse", "HEAD"], 10_000, signal);
+    if (headResult.code !== 0) {
+      throw new Error(headResult.stderr.trim() || "Failed to resolve HEAD commit.");
+    }
+
+    const repoRoot = repoRootResult.stdout.trim();
+    const gitCommonDir = resolveGitCommonDir(repoRoot, gitCommonDirResult.stdout);
+    return {
+      repoRoot,
+      gitCommonDir,
+      canonicalRepoRoot: resolveCanonicalRepoRoot(repoRoot, gitCommonDir),
+      headCommit: headResult.stdout.trim(),
+    };
+  }
+
+  async function loadManagedLease(binding: ManagedSessionBinding | undefined): Promise<ManagedWorktreeLease | undefined> {
+    if (!binding) return undefined;
+    return readManagedWorktreeLease(binding.leaseFile);
+  }
+
+  async function getLiveManagedGitFacts(cwd: string, signal?: AbortSignal): Promise<{ worktreePath?: string; branch?: string }> {
+    const worktreeResult = await execGit(["-C", cwd, "rev-parse", "--show-toplevel"], 10_000, signal);
+    const branchResult = await execGit(["-C", cwd, "branch", "--show-current"], 10_000, signal);
+    return {
+      worktreePath: worktreeResult.code === 0 ? worktreeResult.stdout.trim() : undefined,
+      branch: branchResult.code === 0 ? branchResult.stdout.trim() : undefined,
+    };
+  }
+
+  async function evaluateCurrentManagedMutation(ctx: ExtensionContext, required = Boolean(currentManagedBinding)) {
+    const binding = IS_SUBAGENT_CHILD ? CHILD_MANAGED_WORKTREE_BINDING : currentManagedBinding;
+    const lease = IS_SUBAGENT_CHILD ? await loadManagedLease(binding) : currentManagedLease;
+    const facts = await getLiveManagedGitFacts(ctx.cwd, ctx.signal);
+    return evaluateManagedMutationGate({
+      required: IS_SUBAGENT_CHILD ? CHILD_MANAGED_WORKTREE_REQUIRED : required,
+      cwd: ctx.cwd,
+      binding,
+      lease,
+      liveWorktreePath: facts.worktreePath,
+      liveBranch: facts.branch,
+    });
+  }
+
+  function buildManagedSubagentEnv(): Record<string, string> | undefined {
+    if (!currentManagedBinding) return undefined;
+    return {
+      HARNESS_MANAGED_WORKTREE_REQUIRED: "1",
+      HARNESS_MANAGED_WORKTREE_BINDING: Buffer.from(JSON.stringify(currentManagedBinding), "utf-8").toString("base64url"),
+    };
+  }
+
+  async function reconcileManagedSessionBinding(ctx: ExtensionContext) {
+    currentManagedBinding = readManagedSessionBinding(ctx.sessionManager.getEntries() as Array<{ type: string; customType?: string; data?: unknown }>);
+    currentManagedLease = await loadManagedLease(currentManagedBinding);
+
+    if (currentManagedBinding && !currentManagedLease) {
+      ctx.ui.notify(`Managed worktree lease is missing for ${currentManagedBinding.worktreeId}.`, "warning");
+      return;
+    }
+
+    if (!currentManagedBinding || !currentManagedLease) return;
+
+    if (!currentManagedBinding.sessionFile && ctx.sessionManager.getSessionFile()) {
+      currentManagedBinding = {
+        ...currentManagedBinding,
+        sessionFile: ctx.sessionManager.getSessionFile(),
+      };
+    }
+
+    if (!currentManagedLease.sessionFile && ctx.sessionManager.getSessionFile()) {
+      currentManagedLease = {
+        ...currentManagedLease,
+        sessionFile: ctx.sessionManager.getSessionFile(),
+      };
+    }
+
+    if (!currentManagedBinding || !currentManagedLease) return;
+
+    if (!currentManagedBinding.worktreePath || !currentManagedBinding.targetCwd) return;
+
+    if (!existsSync(currentManagedBinding.worktreePath)) {
+      currentManagedLease = {
+        ...currentManagedLease,
+        lifecycleState: "managed-missing",
+        missingSince: currentManagedLease.missingSince ?? new Date().toISOString(),
+      };
+      await writeManagedWorktreeLease(currentManagedLease);
+      ctx.ui.notify(`Managed worktree path is missing: ${currentManagedBinding.worktreePath}`, "warning");
+      return;
+    }
+
+    currentManagedLease = refreshManagedLease(
+      currentManagedLease,
+      "managed-active",
+      new Date(),
+      DEFAULT_MANAGED_LEASE_TTL_MS,
+    );
+    await writeManagedWorktreeLease(currentManagedLease);
+  }
+
+  async function refreshManagedLeaseHeartbeat() {
+    if (!currentManagedLease) return;
+    currentManagedLease = refreshManagedLease(currentManagedLease, "managed-active", new Date(), DEFAULT_MANAGED_LEASE_TTL_MS);
+    await writeManagedWorktreeLease(currentManagedLease);
+  }
+
+  async function softReleaseManagedLease() {
+    if (!currentManagedLease) return;
+    currentManagedLease = refreshManagedLease(currentManagedLease, "managed-released", new Date(), DEFAULT_MANAGED_LEASE_TTL_MS);
+    await writeManagedWorktreeLease(currentManagedLease);
+  }
+
+  async function runManagedWorktreeJanitor(ctx: ExtensionContext, gitCommonDir: string, currentBindingId?: string) {
+    const leaseFiles = await listManagedWorktreeLeaseFiles(gitCommonDir);
+    if (leaseFiles.length === 0) return;
+
+    const worktreeListResult = await execGit(["-C", ctx.cwd, "worktree", "list", "--porcelain"], 10_000, ctx.signal);
+    if (worktreeListResult.code !== 0) return;
+
+    const worktreeRecords = parseGitWorktreeList(worktreeListResult.stdout);
+
+    for (const leaseFile of leaseFiles) {
+      const lease = await readManagedWorktreeLease(leaseFile);
+      if (!lease) continue;
+
+      const worktreeRecord = findGitWorktreeRecord(worktreeRecords, lease.worktreePath);
+      let clean = false;
+      let uniqueCommitCount = Number.POSITIVE_INFINITY;
+
+      if (worktreeRecord) {
+        const statusResult = await execGit(["-C", lease.worktreePath, "status", "--porcelain", "--untracked-files=all"], 10_000, ctx.signal);
+        clean = statusResult.code === 0 && !hasRelevantGitStatusChanges(statusResult.stdout, lease.worktreePath);
+
+        const revListResult = await execGit(["-C", lease.worktreePath, "rev-list", "--count", `${lease.baseCommit}..HEAD`], 10_000, ctx.signal);
+        uniqueCommitCount = revListResult.code === 0 ? Number.parseInt(revListResult.stdout.trim() || "0", 10) : Number.POSITIVE_INFINITY;
+      }
+
+      const decision = evaluateManagedJanitorDecision({
+        lease,
+        currentBindingId,
+        worktreeRecord,
+        clean,
+        uniqueCommitCount,
+      });
+
+      if (decision.remove) {
+        await execGit(["-C", lease.repoRoot, "worktree", "remove", lease.worktreePath], 15_000, ctx.signal);
+        await deleteManagedWorktreeLease(lease.leaseFile);
+        continue;
+      }
+
+      if (decision.nextState && lease.lifecycleState !== decision.nextState) {
+        await writeManagedWorktreeLease({
+          ...lease,
+          lifecycleState: decision.nextState,
+          missingSince: decision.nextState === "managed-missing"
+            ? lease.missingSince ?? new Date().toISOString()
+            : lease.missingSince,
+        });
+      }
+    }
+  }
+
   function beginActiveProtocolRun(invocation: PendingProtocolInvocation | undefined, ctx: ExtensionContext) {
     activeProtocol = invocation?.protocol;
     pendingProtocolInvocation = undefined;
@@ -2132,23 +2366,8 @@ export default function (pi: ExtensionAPI) {
 
     ctx.ui.setWidget("harness", undefined);
 
-    if (activeProtocol === "explore") {
-      ctx.ui.setStatus(
-        "harness",
-        `🧠 EXPLORE 🤖${exploreTotals.subagentRuns} 🔎${exploreTotals.searches} 🌐${exploreTotals.fetches} 🔗${exploreTotals.sources.size}`,
-      );
-      return;
-    }
-
-    if (activeProtocol === "execute") {
-      const passed = state.acStatuses.filter((a) => a.status === "pass").length;
-      const failed = state.acStatuses.filter((a) => a.status === "fail").length;
-      const pending = state.acStatuses.filter((a) => a.status === "pending").length;
-
-      ctx.ui.setStatus(
-        "harness",
-        `⚙️ EXECUTE 🤖${executeTotals.subagentRuns} ✅${passed} ❌${failed} ⏳${pending} 📦${state.commitCount}`,
-      );
+    if (getManagedStatusSummary()) {
+      ctx.ui.setStatus("harness", `🧱 WT ${getManagedStatusSummary()}`);
       return;
     }
 
@@ -2232,6 +2451,8 @@ export default function (pi: ExtensionAPI) {
     baselineActiveTools = getActiveToolNames();
     resetExploreTracking();
     resetExecuteTracking();
+    currentManagedBinding = undefined;
+    currentManagedLease = undefined;
 
     for (const entry of ctx.sessionManager.getEntries()) {
       if (entry.type === "custom" && entry.customType === "cognitive-harness-state") {
@@ -2249,6 +2470,14 @@ export default function (pi: ExtensionAPI) {
         .filter((name) => getAllToolNames().includes(name));
       pi.setActiveTools(childTools);
       return;
+    }
+
+    await reconcileManagedSessionBinding(ctx);
+    const janitorRepo = currentManagedBinding
+      ? { gitCommonDir: currentManagedBinding.gitCommonDir }
+      : await getGitRepoContext(ctx.cwd).catch(() => undefined);
+    if (janitorRepo?.gitCommonDir) {
+      await runManagedWorktreeJanitor(ctx, janitorRepo.gitCommonDir, currentManagedBinding?.worktreeId);
     }
 
     setProtocolTools(undefined);
@@ -2302,7 +2531,117 @@ export default function (pi: ExtensionAPI) {
         lines.push(`Commits: ${state.commitCount}`);
       }
 
+      if (currentManagedBinding) {
+        lines.push(`Managed worktree: ${currentManagedBinding.worktreeId}`);
+        lines.push(`Managed branch: ${currentManagedBinding.branch}`);
+        lines.push(`Managed path: ${currentManagedBinding.worktreePath}`);
+        lines.push(`Managed state: ${currentManagedLease?.lifecycleState ?? "binding-only"}`);
+      }
+
       ctx.ui.notify(lines.join("\n"), "info");
+    },
+  });
+
+  pi.registerCommand(INTERNAL_MANAGED_WORKTREE_COMMAND, {
+    description: "[internal] Create a managed worktree and switch into its session",
+    handler: async (args, ctx) => {
+      let request: { headOnlyFromDirty?: boolean } = {};
+      const trimmedArgs = args.trim();
+      if (trimmedArgs) {
+        try {
+          request = JSON.parse(Buffer.from(trimmedArgs, "base64url").toString("utf-8"));
+        } catch {
+          ctx.ui.notify("Managed worktree bootstrap arguments were invalid.", "error");
+          return;
+        }
+      }
+
+      let repoContext;
+      try {
+        repoContext = await getGitRepoContext(ctx.cwd);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        ctx.ui.notify(`Managed worktree bootstrap failed: ${reason}`, "error");
+        return;
+      }
+
+      await runManagedWorktreeJanitor(ctx, repoContext.gitCommonDir, currentManagedBinding?.worktreeId);
+
+      const sessionDirPath = resolveSessionDirForCwd(ctx.sessionManager.getSessionDir(), ctx.cwd);
+      const ignoredStatusPaths = isPathInside(repoContext.repoRoot, sessionDirPath) ? [sessionDirPath] : [];
+      const statusResult = await execGit(["-C", repoContext.repoRoot, "status", "--porcelain", "--untracked-files=all"], 10_000);
+      if (statusResult.code !== 0) {
+        ctx.ui.notify(`Managed worktree bootstrap failed: ${statusResult.stderr.trim()}`, "error");
+        return;
+      }
+
+      const hasDirtyChanges = hasRelevantGitStatusChanges(statusResult.stdout, repoContext.repoRoot, ignoredStatusPaths);
+      if (hasDirtyChanges && !request.headOnlyFromDirty) {
+        ctx.ui.notify(
+          "Managed worktree bootstrap cancelled: the current checkout is dirty, and uncommitted changes are not carried into the new worktree. Re-run with explicit HEAD-only confirmation.",
+          "warning",
+        );
+        return;
+      }
+
+      const worktreeId = createManagedWorktreeId();
+      const branch = buildManagedBranchName(worktreeId);
+      const worktreeRoot = resolveManagedWorktreeRoot(repoContext.canonicalRepoRoot, worktreeId);
+      let targetCwd = resolveManagedTargetCwd(worktreeRoot, repoContext.repoRoot, ctx.cwd);
+      const targetSessionDir = resolveTargetSessionDir(ctx.sessionManager.getSessionDir(), worktreeRoot);
+      const initialLease = createManagedWorktreeLease({
+        worktreeId,
+        worktreePath: worktreeRoot,
+        targetCwd,
+        branch,
+        repoRoot: repoContext.repoRoot,
+        gitCommonDir: repoContext.gitCommonDir,
+        baseCommit: repoContext.headCommit,
+        lifecycleState: "provisioning",
+      });
+
+      await writeManagedWorktreeLease(initialLease);
+
+      try {
+        const addResult = await execGit(["-C", repoContext.repoRoot, "worktree", "add", "-b", branch, worktreeRoot, "HEAD"], 20_000);
+        if (addResult.code !== 0) {
+          throw new Error(addResult.stderr.trim() || addResult.stdout.trim() || "git worktree add failed");
+        }
+
+        if (!existsSync(targetCwd)) {
+          targetCwd = worktreeRoot;
+        }
+
+        const targetSessionFile = await writeManagedSessionFile({
+          cwd: targetCwd,
+          sessionDir: targetSessionDir,
+          parentSession: ctx.sessionManager.getSessionFile(),
+          binding: createManagedSessionBinding({
+            ...initialLease,
+            targetCwd,
+          }),
+        });
+
+        currentManagedLease = refreshManagedLease({
+          ...initialLease,
+          targetCwd,
+          sessionFile: targetSessionFile,
+        }, "managed-active", new Date(), DEFAULT_MANAGED_LEASE_TTL_MS);
+        await writeManagedWorktreeLease(currentManagedLease);
+
+        ctx.ui.notify(
+          `Prepared managed worktree ${worktreeId} (${branch}). Switching to ${targetCwd}.`,
+          "info",
+        );
+        await ctx.switchSession(targetSessionFile);
+      } catch (error) {
+        await deleteManagedWorktreeLease(initialLease.leaseFile);
+        await execGit(["-C", repoContext.repoRoot, "worktree", "remove", "--force", worktreeRoot], 15_000);
+        await execGit(["-C", repoContext.repoRoot, "branch", "-D", branch], 10_000);
+
+        const reason = error instanceof Error ? error.message : String(error);
+        ctx.ui.notify(`Managed worktree bootstrap failed: ${reason}`, "error");
+      }
     },
   });
 
@@ -2358,6 +2697,10 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("turn_end", async (event, ctx) => {
+    if (!IS_SUBAGENT_CHILD && currentManagedLease?.lifecycleState === "managed-active") {
+      await refreshManagedLeaseHeartbeat();
+    }
+
     if (!isExploreRuntime() || !exploreChain.active) return;
 
     const finalText = event.message?.role === "assistant"
@@ -2405,9 +2748,14 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
+  pi.on("session_shutdown", async () => {
+    if (IS_SUBAGENT_CHILD) return;
+    await softReleaseManagedLease();
+  });
+
   // ── Tool enforcement ──────────────────────────────────────────────
 
-  pi.on("tool_call", async (event) => {
+  pi.on("tool_call", async (event, ctx) => {
     if (IS_SUBAGENT_CHILD) {
       if (event.toolName === "write" || event.toolName === "edit") {
         const allowed = CHILD_SUBAGENT_TOOLS.includes(event.toolName);
@@ -2425,6 +2773,16 @@ export default function (pi: ExtensionAPI) {
           return {
             block: true,
             reason: `🔴 BLOCKED: ${classification.reason}`,
+          };
+        }
+      }
+
+      if (CHILD_MANAGED_WORKTREE_REQUIRED && (event.toolName === "write" || event.toolName === "edit" || isToolCallEventType("bash", event))) {
+        const gate = await evaluateCurrentManagedMutation(ctx, true);
+        if (!gate.allowed) {
+          return {
+            block: true,
+            reason: `🔴 BLOCKED: ${gate.reason}`,
           };
         }
       }
@@ -2465,6 +2823,16 @@ export default function (pi: ExtensionAPI) {
         return {
           block: true,
           reason: "🔴 BLOCKED: The parent /execute run is orchestration-only. Delegate build/test/check commands to harness_subagents with a VER-configured subagent.",
+        };
+      }
+    }
+
+    if (currentManagedBinding && (event.toolName === "write" || event.toolName === "edit" || event.toolName === "harness_commit" || isToolCallEventType("bash", event))) {
+      const gate = await evaluateCurrentManagedMutation(ctx, true);
+      if (!gate.allowed) {
+        return {
+          block: true,
+          reason: `🔴 BLOCKED: ${gate.reason}`,
         };
       }
     }
@@ -2742,6 +3110,7 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
         activeTools: subagent.activeTools,
         bashPolicy: subagent.bashPolicy,
         extensionPath: CURRENT_EXTENSION_PATH,
+        env: buildManagedSubagentEnv(),
         modelSpec,
         thinkingLevel,
         signal,
@@ -2862,6 +3231,7 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
         activeTools: role.activeTools,
         bashPolicy: role.bashPolicy,
         extensionPath: CURRENT_EXTENSION_PATH,
+        env: buildManagedSubagentEnv(),
         modelSpec,
         thinkingLevel,
         signal,
@@ -2974,6 +3344,7 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
           activeTools: spec.activeTools,
           bashPolicy: spec.bashPolicy,
           extensionPath: CURRENT_EXTENSION_PATH,
+          env: buildManagedSubagentEnv(),
           modelSpec,
           thinkingLevel,
           signal,
@@ -3058,6 +3429,48 @@ After VER confirms all gates pass and no regressions for an increment, VER MUST 
       }
 
       return renderStableTextLineList(renderExecuteSubagentCollapsedText(details, theme), context);
+    },
+  });
+
+  pi.registerTool({
+    name: INTERNAL_MANAGED_WORKTREE_TOOL,
+    label: "Managed Workspace Bootstrap",
+    description: "Queue the internal managed-worktree bootstrap so harness can create a clean isolated worktree and switch sessions without exposing a public slash-command workflow.",
+    promptSnippet: "Queue the internal managed-worktree bootstrap for a task/session when isolated worktree execution is required.",
+    promptGuidelines: [
+      "Use this tool when a task needs a clean isolated managed worktree before implementation proceeds.",
+      "This is an orchestration primitive; users are not expected to invoke the internal command directly.",
+      "If the current checkout is dirty, set headOnlyFromDirty to true only when you explicitly want the new worktree based on HEAD without carrying local edits.",
+    ],
+    parameters: Type.Object({
+      headOnlyFromDirty: Type.Optional(Type.Boolean({ description: "Explicitly confirm HEAD-only bootstrap when the current checkout is dirty." })),
+    }),
+    renderShell: "self",
+    async execute(_toolCallId, params) {
+      const payload = Buffer.from(JSON.stringify({ headOnlyFromDirty: params.headOnlyFromDirty === true }), "utf-8").toString("base64url");
+      pi.sendUserMessage(`/${INTERNAL_MANAGED_WORKTREE_COMMAND} ${payload}`, { deliverAs: "followUp" });
+      const summary = params.headOnlyFromDirty
+        ? "Queued internal managed-worktree bootstrap with explicit HEAD-only confirmation for a dirty source checkout."
+        : "Queued internal managed-worktree bootstrap. If the current checkout is dirty, the bootstrap will stop unless rerun with headOnlyFromDirty: true.";
+      return {
+        content: [{ type: "text", text: summary }],
+        details: {
+          queued: true,
+          headOnlyFromDirty: params.headOnlyFromDirty === true,
+          command: INTERNAL_MANAGED_WORKTREE_COMMAND,
+        },
+      };
+    },
+    renderCall(args, theme, context) {
+      const dirtyMode = args.headOnlyFromDirty ? " · HEAD-only" : "";
+      return new Text(`${compactToolTitle(theme, context, "managed_workspace")} ${theme.fg("accent", "queue bootstrap")}${theme.fg("muted", dirtyMode)}`, 0, 0);
+    },
+    renderResult(result, options, theme, context) {
+      const details = result.details as { queued?: boolean; headOnlyFromDirty?: boolean } | undefined;
+      const summary = details?.queued
+        ? details.headOnlyFromDirty ? "queued · HEAD-only" : "queued"
+        : undefined;
+      return renderCompactToolResult(result, options, theme, context, summary);
     },
   });
 

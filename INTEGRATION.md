@@ -8,7 +8,7 @@
 │  - /explore protocol                                          │
 │  - /execute protocol                                          │
 │  - harness_subagents generic subprocess runtime               │
-│  - tool enforcement, registry plumbing, state, status UI      │
+│  - tool enforcement, registry plumbing, and state             │
 ├──────────────────────────────────────────────────────────────┤
 │  Project-specific skills / checks                             │
 │  - /verify-native, /verify-web, custom smoke checks, etc.     │
@@ -175,4 +175,4 @@ If your environment supports only Markdown skills, copy the skills directly:
 cp -r /path/to/harness/skills/* /project/.claude/skills/
 ```
 
-That gives you the protocols without extension enforcement, live status UI, or persistent registry tooling.
+That gives you the protocols without extension enforcement or persistent registry tooling.
