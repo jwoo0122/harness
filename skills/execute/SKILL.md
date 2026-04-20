@@ -59,71 +59,98 @@ These sub-agents are run in a row, and we can repeat the cycle if the verificati
 
 ---
 
-## Cumulative Verification Registry
+## Cumulative Verification Accumulation
 
-The execute protocol maintains a **Verification Registry** — a persistent catalog that records HOW each acceptance criterion is verified. The registry lives in the project at `.harness/verification-registry.json` and is committed alongside production code.
+The execute protocol maintains cumulative verification in **two layers**:
 
-### Why cumulative verification
+1. **Committed verification specs** in `.harness/verification-registry.json`
+   - reusable definitions of **how** a requirement is verified
+   - these are policy / catalog, not runtime truth
+2. **Runtime immutable receipts** under the repo's **git common dir**
+   - authoritative evidence of actual executions
+   - these receipts determine the latest `pass` / `fail` / `missing` / `stale` status
 
-| Without registry | With registry |
+### Why cumulative verification accumulation
+
+| Without accumulated specs + receipts | With accumulated specs + receipts |
 |---|---|
-| VER invents verification ad-hoc per increment | VER re-runs recorded, proven verification methods |
-| Regression checks are shallow ("test suite passes") | Every past AC has a specific, reproducible verification |
-| Verification knowledge is lost between iterations | Catalog grows with each iteration, carries forward |
-| Quality floor is implicit and drifts | Quality floor is explicit and enforced |
+| VER invents verification ad-hoc per increment | reusable specs survive across increments |
+| A repo file can claim a pass without executed proof | runtime status is derived from executed receipts |
+| Regression checks are shallow ("test suite passes") | every accumulated check has durable execution evidence |
+| Verification knowledge drifts | the committed spec catalog stays stable while receipts keep growing |
 
-### What VER records
+### What VER registers
 
-For each AC that passes, VER registers:
+VER registers a reusable **Verification Spec** describing:
+- **check_id** — stable identifier for the reusable check
+- **bindings** — requirement / AC bindings satisfied by the check
 - **strategy** — how it's verified (`automated-test`, `type-check`, `build-output`, `lint-rule`, `manual-check`, etc.)
-- **command** — the exact command to re-run the verification (if applicable)
-- **files** — test or verification files involved
-- **description** — human-readable explanation of what's being checked
+- **mode** — `automated` or `manual`
+- **blocking** — whether the check is gating or advisory
+- **command** — exact command to execute when automated
+- **files** — relevant files / inputs
+- **description** — what the check proves
 
-### When to register
+### What VER executes
 
-VER registers a verification method immediately after marking an AC as passed (Phase 2d). If a passing AC has no registered verification method, this is a **gap** — PLN should challenge VER.
+VER then runs automated specs to produce immutable **Verification Receipts** containing executed evidence such as:
+- spec/check identity
+- commit identity
+- worktree/session context when available
+- exact command executed
+- timestamps
+- exit status
+- stdout / stderr references or digests
 
-### When to consult
+### When to register vs run
 
-During regression checks (Phase 2e), VER pulls the full registry and re-runs every registered verification. A regression is not just "does the test suite pass" — it's "does every individual AC's specific verification still hold."
+- `harness_verify_register` defines or updates the reusable spec.
+- `harness_verify_run` executes automated specs and appends receipts.
+- `harness_verify_list` shows the latest **receipt-derived** status.
 
-### Registry lifecycle
+A registered spec without executed receipts is **not yet proven**.
+A passing AC without a reusable verification spec is still a **gap** — PLN should challenge VER.
+
+### Verification lifecycle
 
 ```
-Iteration 1: VER verifies AC-1.1, AC-1.2
-             → registers 2 methods → registry has 2 entries
+Iteration 1: VER defines 2 reusable specs
+             → committed spec surface has 2 specs
+             → VER executes them → runtime receipt ledger has 2 receipts
 
-Iteration 2: VER verifies AC-2.1, AC-2.2
-             → registers 2 methods → registry has 4 entries
-             → regression check re-runs all 4 registered verifications
+Iteration 2: VER defines 1 more spec and re-runs prior blocking specs
+             → committed spec surface has 3 specs
+             → runtime receipt ledger appends fresh receipts
+             → latest status is derived from the freshest applicable receipts
 
-Iteration 3: VER verifies AC-3.1
-             → registers 1 method → registry has 5 entries
-             → regression check re-runs all 5 registered verifications
-
-...quality floor only rises, never falls.
+...the verification method catalog stays reusable, and the evidence ledger keeps growing.
 ```
 
-### Registry file format
+### Committed spec file format
 
 `.harness/verification-registry.json`:
 ```json
 {
-  "$schema": "harness-verification-registry-v1",
-  "entries": {
-    "AC-1.1": {
-      "requirement": "User can log in with email",
-      "source": "iteration-4-criteria.md",
+  "$schema": "harness-verification-registry-v2",
+  "specs": {
+    "login-email": {
+      "check_id": "login-email",
+      "bindings": [
+        {
+          "binding_id": "AC-1.1",
+          "requirement": "User can log in with email",
+          "source": "iteration-4-criteria.md",
+          "registeredAt": "INC-1"
+        }
+      ],
       "verification": {
         "strategy": "automated-test",
+        "mode": "automated",
+        "blocking": true,
         "command": "npm test -- --grep 'login with email'",
         "files": ["tests/auth/login.test.ts"],
         "description": "Integration test verifying email login returns valid session"
-      },
-      "registeredAt": "INC-1",
-      "lastVerifiedAt": "INC-7",
-      "lastResult": "pass"
+      }
     }
   }
 }
@@ -151,8 +178,9 @@ VER records:
   - Lint warning count: [N]
   - Tests: [passed]/[total]
   - Build: pass/fail
-  - Verification Registry: [N] entries loaded from .harness/verification-registry.json
-  - If registry exists, VER re-runs ALL registered verifications as part of baseline
+  - Verification Specs: [N] specs loaded from .harness/verification-registry.json
+  - Verification Receipts: [N] receipts observed in the git-common-dir runtime store
+  - If blocking specs already exist, VER inspects receipt-derived status and re-runs stale/missing/needed specs as part of baseline
 
 PLN reviews:
   - Baseline failure → STOP. IMP fixes baseline first.
@@ -250,14 +278,17 @@ VER should design verifications that are **registrable** — specific, reproduci
 📋 PLN reviews: "AC-1.3 — VER checked names but not types" → VER re-verifies
 ```
 
-After marking an AC as ✅ PASS, VER **MUST** register the verification method:
+After marking an AC as ✅ PASS, VER **MUST** ensure there is a reusable verification spec and executed evidence for it.
 
-**If running inside pi with the harness extension**, VER calls `harness_verify_register`:
+**If running inside pi with the harness extension**, VER first calls `harness_verify_register` to define or update the reusable verification spec:
 ```
 harness_verify_register({
   ac_id: "AC-1.1",
+  check_id: "login-email",
   requirement: "User can log in with email",
   strategy: "automated-test",
+  mode: "automated",
+  blocking: true,
   command: "npm test -- --grep 'login with email'",
   files: ["tests/auth/login.test.ts"],
   description: "Integration test verifying email login returns valid session",
@@ -265,31 +296,42 @@ harness_verify_register({
 })
 ```
 
-**If running without the extension**, append the entry to `.harness/verification-registry.json`.
+Then VER executes the spec to produce authoritative receipts:
+```
+harness_verify_run({ check_ids: ["login-email"] })
+```
 
-A passing AC without a registered verification method is a **gap**. PLN should challenge: "How will we catch regressions for this AC in future increments?"
+Then VER inspects the latest receipt-derived status:
+```
+harness_verify_list({ filter: "login-email" })
+```
 
-#### 2e. VER regression check (registry-driven)
+**If running without the extension**, update the committed spec file and run the corresponding verification command yourself; do not treat a repo-file summary as authoritative pass/fail truth.
 
-After every increment, VER consults the **Verification Registry** and re-runs ALL registered verifications — not just a general test suite pass.
+A passing AC without a reusable verification spec is a **gap**. PLN should challenge: "How will we catch regressions for this AC in future increments?"
 
-**Step 1**: Call `harness_verify_list` (or read `.harness/verification-registry.json`) to get all registered methods.
+#### 2e. VER regression check (receipt-driven)
 
-**Step 2**: Re-run every registered verification command.
+After every increment, VER consults the committed spec catalog and the accumulated receipt ledger — not just a general test suite pass.
 
-**Step 3**: Report per-entry results:
+**Step 1**: Call `harness_verify_list` to inspect the latest receipt-derived status for the accumulated specs.
+
+**Step 2**: Call `harness_verify_run` for any blocking specs that are missing, stale, or otherwise need fresh execution evidence.
+
+**Step 3**: Report per-spec results:
 
 ```markdown
 ✅ VER: Regression scan after INC-[N]
-Registry entries: [total]
+Specs shown: [total]
 
-| AC     | Strategy        | Command                           | Result        |
-|--------|----------------|-----------------------------------|---------------|
-| AC-1.1 | automated-test | npm test -- --grep 'login'        | ✅ still pass  |
-| AC-1.2 | type-check     | tsc --noEmit                      | ✅ still pass  |
-| AC-2.1 | automated-test | npm test -- --grep 'user profile' | ❌ REGRESSED   |
+| Check ID     | Status   | Command                           | Evidence                    |
+|--------------|----------|-----------------------------------|-----------------------------|
+| login-email  | ✅ PASS  | npm test -- --grep 'login'        | receipt rcp-001 @ HEAD      |
+| types-main   | ✅ PASS  | tsc --noEmit                      | receipt rcp-002 @ HEAD      |
+| user-profile | ❌ FAIL  | npm test -- --grep 'user profile' | receipt rcp-003 exit 1      |
+| api-smoke    | ⌛ STALE | npm run smoke:api                 | latest receipt on old spec  |
 
-🚨 REGRESSION in AC-2.1 → STOP
+🚨 REGRESSION / STALE BLOCKER in user-profile or api-smoke → STOP
 ```
 
 On regression:
@@ -381,9 +423,10 @@ Criteria text is the tiebreaker. Ambiguous criteria → STOP, ask user.
 - ❌ Proceeding past a VER STOP signal
 - ❌ Roles collapsing ("I'll just quickly check it myself")
 - ❌ Creative exploration beyond the criteria (→ use /explore)
-- ❌ VER passing an AC without registering a verification method
-- ❌ Running regression checks without consulting the Verification Registry
-- ❌ Registering "manual-check" when an automated verification is feasible
+- ❌ VER passing an AC without registering a reusable verification spec
+- ❌ Treating spec registration as proof of pass without executed receipts
+- ❌ Running regression checks without consulting receipt-derived status via the verification catalog + receipt ledger
+- ❌ Registering `manual-check` as blocking when an automated verification is feasible
 
 ## Transition Rules
 

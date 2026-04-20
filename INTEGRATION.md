@@ -108,25 +108,35 @@ Examples:
 - API changes → integration tests
 - desktop app changes → native smoke flow
 
-## Verification registry plumbing
+## Verification accumulation plumbing
 
-The execute protocol maintains a cumulative verification registry at:
+The execute protocol now uses a split authority model:
+
+Committed verification specs live at:
 
 ```text
 .harness/verification-registry.json
 ```
 
+Runtime immutable receipts live under the repo's **git common dir** at:
+
+```text
+<GIT_COMMON_DIR>/pi-harness/verification/
+```
+
 Tools:
-- `harness_verify_register`
-- `harness_verify_list`
+- `harness_verify_register` — register or update a reusable verification spec
+- `harness_verify_run` — execute automated specs and append immutable receipts
+- `harness_verify_list` — inspect receipt-derived latest status
 
 Expected smoke behavior:
-1. baseline load succeeds even if the registry does not exist yet
-2. VER registers a passing AC with `harness_verify_register`
-3. regression checks read the full registry via `harness_verify_list`
-4. every registered verification command is re-run during regression scanning
+1. baseline load succeeds even if the committed spec surface does not exist yet
+2. VER registers or updates a reusable verification spec with `harness_verify_register`
+3. VER executes one or more specs via `harness_verify_run`
+4. receipt-derived status is inspected via `harness_verify_list`
+5. reruns append receipt history instead of overwriting prior evidence
 
-This package provides the registry mechanism.
+This package provides the verification accumulation mechanism.
 The host project provides the concrete verification commands worth recording.
 
 ## Recommended integration shape for the execute protocol

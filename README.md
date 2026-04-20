@@ -197,29 +197,38 @@ New integrations should prefer `harness_subagents`.
 - there is no separate subagent widget; live progress is rendered inside the subagent tool call itself
 - there is no always-on harness dashboard widget anymore
 
-### 5. Verification registry stays cumulative
+### 5. Verification accumulation stays cumulative
 
-The execute protocol persists reproducible AC verification methods in:
+The execute protocol now splits verification authority into two layers:
+
+- committed reusable verification specs in:
 
 ```text
 .harness/verification-registry.json
 ```
 
-VER records:
-- strategy
-- exact command
-- relevant files
-- human-readable description
+- runtime immutable verification receipts in the repo's **git common dir** under:
 
-Then future regression scans can re-run the same checks.
+```text
+<GIT_COMMON_DIR>/pi-harness/verification/
+```
 
-## Verification registry smoke path
+VER uses:
+- `harness_verify_register` to define or update reusable verification specs
+- `harness_verify_run` to execute automated specs and append immutable receipts
+- `harness_verify_list` to inspect receipt-derived latest status (`pass` / `fail` / `missing` / `stale`)
+
+The committed spec file is not the runtime source of truth for pass/fail freshness.
+That authority comes from executed receipts.
+
+## Verification accumulation smoke path
 
 A smoke-level execute increment should be able to:
-1. load or create `.harness/verification-registry.json`
-2. register a passing AC via `harness_verify_register`
-3. list cumulative entries with `harness_verify_list`
-4. re-run registered verifications during regression scanning
+1. load or create the committed spec file at `.harness/verification-registry.json`
+2. register or update a reusable verification spec via `harness_verify_register`
+3. execute one or more specs via `harness_verify_run`
+4. persist immutable receipts under the repo's git-common-dir-backed runtime store
+5. inspect receipt-derived latest status via `harness_verify_list`
 
 ## Development workflow
 
