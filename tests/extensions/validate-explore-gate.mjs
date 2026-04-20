@@ -40,6 +40,17 @@ assert.equal(
   "extensions/index.ts should only touch the harness widget to clear it",
 );
 assert.ok(
+  indexSource.includes('ctx.ui.setStatus("harness", `🧱 WT ${getManagedStatusSummary()}`);'),
+  "updateUI must retain the managed worktree status path",
+);
+assert.ok(
+  indexSource.includes('ctx.ui.setStatus("harness", undefined);'),
+  "updateUI must clear harness status when no managed worktree is bound",
+);
+for (const removedStatusCopy of ["🧠 EXPLORE", "⚙️ EXECUTE"]) {
+  assert.ok(!indexSource.includes(removedStatusCopy), `extensions/index.ts must not restore removed protocol status copy: ${removedStatusCopy}`);
+}
+assert.ok(
   !indexSource.includes('pi.sendUserMessage("/skill:explore') && !indexSource.includes('pi.sendUserMessage("/skill:execute'),
   "extensions/index.ts should no longer dispatch /skill:explore or /skill:execute followUps",
 );

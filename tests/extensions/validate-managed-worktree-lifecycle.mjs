@@ -25,7 +25,10 @@ for (const marker of [
   'pi.on("session_shutdown"',
   'await softReleaseManagedLease();',
   'await refreshManagedLeaseHeartbeat();',
+  'pi.registerCommand("harness-status", {',
   'Managed worktree:',
+  'Managed branch:',
+  'Managed path:',
   'Managed state:',
   'ctx.ui.setStatus("harness", `🧱 WT ${getManagedStatusSummary()}`);',
 ]) {

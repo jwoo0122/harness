@@ -2319,27 +2319,6 @@ export default function (pi: ExtensionAPI) {
 
     ctx.ui.setWidget("harness", undefined);
 
-    if (activeProtocol === "explore") {
-      ctx.ui.setStatus(
-        "harness",
-        `🧠 EXPLORE 🤖${exploreTotals.subagentRuns} 🔎${exploreTotals.searches} 🌐${exploreTotals.fetches} 🔗${exploreTotals.sources.size}`,
-      );
-      return;
-    }
-
-    if (activeProtocol === "execute") {
-      const passed = state.acStatuses.filter((a) => a.status === "pass").length;
-      const failed = state.acStatuses.filter((a) => a.status === "fail").length;
-      const pending = state.acStatuses.filter((a) => a.status === "pending").length;
-      const managedSuffix = getManagedStatusSummary() ? ` 🧱${getManagedStatusSummary()}` : "";
-
-      ctx.ui.setStatus(
-        "harness",
-        `⚙️ EXECUTE 🤖${executeTotals.subagentRuns} ✅${passed} ❌${failed} ⏳${pending} 📦${state.commitCount}${managedSuffix}`,
-      );
-      return;
-    }
-
     if (getManagedStatusSummary()) {
       ctx.ui.setStatus("harness", `🧱 WT ${getManagedStatusSummary()}`);
       return;
