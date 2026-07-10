@@ -1,0 +1,4 @@
+interface:
+  display_name: "Engineering Lead"
+  short_description: "Plan, delegate, implement, and verify engineering work"
+  default_prompt: "Use $engineering-lead to turn this request into a verified engineering outcome."
