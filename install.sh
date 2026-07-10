@@ -5,6 +5,8 @@ SCRIPT_DIR=$(CDPATH= cd "$(dirname "$0")" && pwd)
 HARNESS_HOME=${HARNESS_HOME:-${HOME:?HOME is required}}
 CODEX_HOME=${CODEX_HOME:-"$HARNESS_HOME/.codex"}
 AGENTS_HOME=${AGENTS_HOME:-"$HARNESS_HOME/.agents"}
+HARNESS_REF=${HARNESS_REF:-main}
+HARNESS_ARCHIVE_URL=${HARNESS_ARCHIVE_URL:-"https://codeload.github.com/jwoo0122/engineering-harness-skills/tar.gz/$HARNESS_REF"}
 MODE=install
 
 usage() {
@@ -40,10 +42,54 @@ say() {
   printf '%s\n' "$*"
 }
 
+sources_available() {
+  [ -f "$SOURCE_AGENTS" ] &&
+    [ -f "$SOURCE_SKILL/SKILL.md" ] &&
+    [ -d "$SOURCE_PERSONAS" ]
+}
+
+running_from_source_tree() {
+  [ "$(basename "$0")" = install.sh ] && sources_available
+}
+
 require_sources() {
   [ -f "$SOURCE_AGENTS" ] || fail "missing source: $SOURCE_AGENTS"
   [ -f "$SOURCE_SKILL/SKILL.md" ] || fail "missing source: $SOURCE_SKILL/SKILL.md"
   [ -d "$SOURCE_PERSONAS" ] || fail "missing source: $SOURCE_PERSONAS"
+}
+
+bootstrap_sources() {
+  command -v curl >/dev/null 2>&1 || fail "curl is required for remote installation"
+  command -v tar >/dev/null 2>&1 || fail "tar is required for remote installation"
+
+  bootstrap_root=$(mktemp -d "${TMPDIR:-/tmp}/engineering-harness-download.XXXXXX")
+  trap 'rm -rf "$bootstrap_root"' EXIT
+  trap 'exit 130' HUP INT TERM
+  archive=$bootstrap_root/source.tar.gz
+  extracted=$bootstrap_root/extracted
+  mkdir -p "$extracted"
+
+  say "Downloading Engineering Harness from $HARNESS_ARCHIVE_URL"
+  curl -fsSL "$HARNESS_ARCHIVE_URL" -o "$archive" || fail "could not download the Engineering Harness source archive"
+  tar -xzf "$archive" -C "$extracted" || fail "could not extract the Engineering Harness source archive"
+
+  set -- "$extracted"/*
+  [ "$#" -eq 1 ] && [ -d "$1" ] || fail "source archive must contain exactly one top-level directory"
+  downloaded_root=$1
+  [ -f "$downloaded_root/install.sh" ] || fail "source archive is missing install.sh"
+  [ -f "$downloaded_root/AGENTS.md" ] || fail "source archive is missing AGENTS.md"
+  [ -f "$downloaded_root/.agents/skills/engineering-lead/SKILL.md" ] || fail "source archive is missing the engineering-lead skill"
+  [ -d "$downloaded_root/.codex/agents" ] || fail "source archive is missing Codex personas"
+
+  bootstrap_status=0
+  case $MODE in
+    install) "$downloaded_root/install.sh" || bootstrap_status=$? ;;
+    dry-run) "$downloaded_root/install.sh" --dry-run || bootstrap_status=$? ;;
+    check) "$downloaded_root/install.sh" --check || bootstrap_status=$? ;;
+  esac
+  rm -rf "$bootstrap_root"
+  trap - EXIT HUP INT TERM
+  exit "$bootstrap_status"
 }
 
 ensure_backup_root() {
@@ -184,6 +230,7 @@ dry_run() {
   say "Existing conflicting harness files would be backed up under $STATE_HOME/backups"
 }
 
+running_from_source_tree || bootstrap_sources
 require_sources
 
 case $MODE in
