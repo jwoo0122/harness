@@ -33,6 +33,7 @@ printf '%s\n' '---' 'name: engineering-lead' 'description: poison global skill m
   printf '%s\n' "$PACK_JSON" | grep -F 'lib/launcher.js' >/dev/null
   printf '%s\n' "$PACK_JSON" | grep -F '.agents/skills/engineering-lead/SKILL.md' >/dev/null
   printf '%s\n' "$PACK_JSON" | grep -F '.pi/agents/implementer.md' >/dev/null
+  printf '%s\n' "$PACK_JSON" | grep -F 'resources/AGENTS.md' >/dev/null
   npm pack --ignore-scripts --pack-destination "$TEST_ROOT" >/dev/null
 )
 
@@ -47,7 +48,8 @@ PACKAGE_INSTALL="$INSTALL_ROOT/lib/node_modules/engineering-harness-skills"
 [ ! -e "$NODE_ONLY_BIN/pi" ]
 
 VERSION=$(env -i HOME="$HOME_ROOT" PATH="$NODE_ONLY_BIN" "$BIN" --version)
-[ "$VERSION" = "0.2.0" ]
+EXPECTED_VERSION=$(PACKAGE_JSON="$(cat "$ROOT/package.json")" node --input-type=module -e 'import process from "node:process"; process.stdout.write(JSON.parse(process.env.PACKAGE_JSON).version)')
+[ "$VERSION" = "$EXPECTED_VERSION" ]
 env -i HOME="$HOME_ROOT" PATH="$NODE_ONLY_BIN" "$BIN" --help | grep -F 'No separate pi installation is required.' >/dev/null
 if env -i HOME="$HOME_ROOT" PATH="$NODE_ONLY_BIN" "$BIN" setup --check >/dev/null 2>&1; then
   printf '%s\n' 'setup --check must fail without changing missing defaults' >&2

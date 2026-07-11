@@ -1,6 +1,6 @@
 {
   "name": "engineering-harness-skills",
-  "version": "0.2.0",
+  "version": "0.0.0-development",
   "description": "Standalone engineering harness CLI with bundled Pi runtime and bounded subagents",
   "type": "module",
   "license": "MIT",
@@ -27,20 +27,34 @@
     "engineering-harness": "bin/engineering-harness.js"
   },
   "files": [
-    "AGENTS.md",
     ".agents/skills",
     ".pi/agents",
     "bin",
     "lib",
+    "resources",
     "README.md",
     "LICENSE",
     "THIRD-PARTY-NOTICES.md"
   ],
   "scripts": {
-    "test": "./tests/test-install.sh && ./tests/test-standalone-cli.sh"
+    "release": "semantic-release",
+    "test": "./tests/test-install.sh && ./tests/test-standalone-cli.sh && ./tests/test-release-automation.sh"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "0.80.6",
     "pi-sub-agent": "0.1.5"
+  },
+  "devDependencies": {
+    "@semantic-release/changelog": "6.0.3",
+    "@semantic-release/commit-analyzer": "13.0.1",
+    "@semantic-release/exec": "7.1.0",
+    "@semantic-release/git": "10.0.1",
+    "@semantic-release/github": "12.0.9",
+    "@semantic-release/npm": "13.1.5",
+    "@semantic-release/release-notes-generator": "14.1.1",
+    "semantic-release": "25.0.6"
   }
 }

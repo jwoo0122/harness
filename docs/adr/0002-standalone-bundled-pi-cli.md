@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-Engineering Harness 0.1.0 was a Pi package. Its `pi-sub-agent` extension was bundled, but the user still had to install and run a compatible global `pi` executable. The package did not expose an executable harness command or own its own authentication, session, trust, and role state.
+The pre-standalone Engineering Harness distribution was a Pi package. Its `pi-sub-agent` extension was bundled, but the user still had to install and run a compatible global `pi` executable. The package did not expose an executable harness command or own its own authentication, session, trust, and role state.
 
 The project needs an external harness command, comparable to Gajae-Code's `gjc`: users install one npm package, run one command, and do not separately install Pi or the subagent runtime. Node.js remains a documented prerequisite rather than a bundled runtime.
 
@@ -27,6 +27,6 @@ Publish `engineering-harness` from the existing npm package and make it the supp
 
 Users install and update only `engineering-harness-skills`; no global `pi` or separate `pi-sub-agent` installation is needed. They authenticate within Harness-owned state or provide supported API-key environment variables.
 
-This is a breaking distribution change for Pi-package users. `engineering-harness-skills@0.1.0` is the legacy rollback version, and users migrate by removing its Pi package entry before installing the CLI.
+This is a breaking distribution change for Pi-package users. Users migrate by removing the legacy Pi package entry before installing the CLI. The legacy source layout remains available in Git history for rollback; it is not a supported new installation.
 
 The installed CLI footprint is larger and its direct Pi runtime dependency is now a release and security responsibility. The runtime and subagent versions are pinned, and the acceptance test verifies a packed, global-like install succeeds with no `pi` executable on `PATH`.

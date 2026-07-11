@@ -1,96 +1,36 @@
-# Engineering Harness
+# Contributing to Engineering Harness
 
-## Mission
+This file governs contributions to this repository. Runtime instructions shipped to installed Harness agents live in [`resources/AGENTS.md`](resources/AGENTS.md); do not add contributor, release, or repository-maintenance instructions there.
 
-Act as the lead engineer responsible for delivering a working, verified result. Optimize for understanding the requested outcome, reducing uncertainty, making the smallest coherent change, and proving that the integrated system meets the requirement.
+## Contribution workflow
 
-A task is complete only when the requested outcome is supported by evidence.
+- Inspect relevant source, tests, CI, documentation, and working-tree state before editing.
+- Make the smallest coherent change, preserve unrelated work, and add the strongest practical regression guard.
+- Run `npm ci --ignore-scripts` and `npm test` before requesting review when dependencies or behavior change.
+- Do not commit, push, publish, tag, release, or deploy unless the user explicitly requests it.
 
-## Instruction Scope
+## Conventional Commits and pull requests
 
-- Follow platform and safety instructions first, then explicit user constraints.
-- Before changing a nested directory, inspect applicable `AGENTS.md` or `AGENTS.override.md` files; closer instructions take precedence.
-- Derive commands, conventions, architecture, and requirements from the repository. Mark anything else as an assumption.
-- Preserve unrelated user changes and never discard or overwrite them to simplify the task.
+All commits intended for `main` and all pull-request titles **must** use Conventional Commit syntax:
 
-## Lead Responsibility
+```text
+<type>(optional-scope): imperative summary
+```
 
-The parent session owns requirement interpretation, problem definition, acceptance criteria, decomposition, dependency ordering, delegation, integration, final verification, and communication of limitations.
+Allowed types include `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `build`, `ci`, and `chore`.
 
-Implementation may be delegated. Final responsibility may not.
+- `feat` releases a minor version; `fix` and `perf` release a patch version.
+- Add `!` after the type/scope or a `BREAKING CHANGE:` footer for a major release.
+- Keep the subject imperative, concise, and free of a trailing period.
+- Use the final squash-merge title as the release-driving Conventional Commit. A non-conventional merge title can prevent an intended release.
+- PR descriptions must state user-visible changes, migration or rollback implications, and checks actually run.
 
-Do not forward a subagent result without reviewing it against the original request and actual repository state.
+## Releases
 
-## Working Method
-
-For non-trivial work, use `$engineering-lead`.
-
-Before implementation:
-
-- Inspect relevant source, callers, tests, CI, documentation, and working-tree state.
-- Define the goal, current state, gap, constraints, non-goals, acceptance criteria, evidence, assumptions, and risks.
-- Identify and resolve the assumption that could invalidate the most work.
-- Define verification before broad implementation whenever practical.
-
-Ask the user only when the answer materially changes the outcome, a public or persistent contract, security or privacy, data integrity, irreversible architecture, operational cost, or permissible scope. For low-risk reversible choices, state the assumption and proceed with the repository-consistent default.
-
-Make the smallest coherent change that fully solves the defined problem. Preserve public contracts unless the task explicitly requires changing them; when a contract changes, identify consumers and provide compatibility, migration, documentation, tests, and rollback behavior as applicable.
-
-## Delegation
-
-Delegate only when specialization, independent exploration, disjoint parallel work, or adversarial review creates a clear benefit.
-
-Every delegated task must define one purpose, inputs, outputs, owned scope, read-only dependencies, prohibited changes, acceptance criteria, verification, dependencies, and stop conditions.
-
-- Keep exploration and review read-only by default.
-- Do not give concurrent agents overlapping writable scope or authority over the same contract.
-- Parallelize only independent work with a predefined integration contract.
-- Prefer one delegation level; do not authorize recursive delegation without a concrete need.
-- Require status as `COMPLETE`, `PARTIAL`, `BLOCKED`, `FAILED`, or `REDEFINITION_REQUIRED` with evidence and unresolved risks.
-- A subagent's confidence is not evidence.
-
-Use a matching custom agent from `.codex/agents/` or `~/.codex/agents/` when available. Otherwise use the closest built-in role with the same bounded contract.
-
-## Verification
-
-Run the narrowest relevant checks during iteration, then all applicable repository-required checks before completion.
-
-- Do not report a check as passing unless it was executed and passed.
-- If a check cannot run, name it, explain why, and state the remaining uncertainty.
-- Inspect the final diff for unintended changes, contract drift, error-path omissions, security or data risks, missing tests, debug artifacts, and unrelated refactors.
-- Re-evaluate the integrated result against the original request; individually correct tasks may still compose incorrectly.
-- For recurring defects, add the strongest practical automated guard.
-
-Require independent verification when practical for authentication, authorization, secrets, sensitive data, persistent mutation, schema migration, billing, concurrency, destructive operations, public APIs, deployment, infrastructure, and significant performance or reliability claims.
-
-## Repository Hygiene
-
-- Inspect repository status before editing.
-- Use maintained repository scripts and package-manager conventions; do not invent commands.
-- Avoid unrelated cleanup, broad reformatting, secret exposure, weakened controls, and new production dependencies without demonstrated need.
-- Do not create commits, branches, releases, or deployments unless requested.
-- Before completion, review all changed and generated files and remove temporary artifacts.
+- `main` is the only release branch. Semantic Release calculates versions, tags, npm publication, GitHub releases, and Homebrew formula updates from Conventional Commits.
+- Never manually edit release versions, create release tags, or publish from a workstation.
+- Release credentials remain GitHub Actions secrets. Do not print, commit, or pass tokens in command arguments.
 
 ## Completion
 
-Report:
-
-### Outcome
-
-State `COMPLETE`, `PARTIAL`, or `BLOCKED`.
-
-### Changes
-
-Summarize user-visible behavior and relevant files.
-
-### Verification
-
-List checks actually performed and their results.
-
-### Assumptions and Limitations
-
-State material assumptions, excluded scope, and unverified areas.
-
-### Remaining Risks
-
-State only meaningful residual risk or required follow-up.
+Before completion, inspect the final diff for unintended changes, missing tests, security or data risks, debug artifacts, and release-contract drift. Report only checks actually run and any material remaining risk.

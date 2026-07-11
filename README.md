@@ -39,7 +39,7 @@ engineering-harness --pi-help
 
 ## What the CLI owns
 
-The command launches the bundled `@earendil-works/pi-coding-agent@0.80.6` directly, with absolute paths to the bundled Harness skills and `pi-sub-agent` extension. Its subagents re-execute the same wrapper, so they use the bundled runtime rather than searching `PATH` for a global `pi` executable.
+The command launches the bundled `@earendil-works/pi-coding-agent@0.80.6` directly, with absolute paths to the bundled Harness skills, runtime guidance (`resources/AGENTS.md`), and `pi-sub-agent` extension. Its subagents re-execute the same wrapper, so they use the bundled runtime rather than searching `PATH` for a global `pi` executable.
 
 Harness state is isolated from Pi's normal state:
 
@@ -103,18 +103,29 @@ npm install -g --ignore-scripts engineering-harness-skills
 
 Do not run `pi update` for this installation.
 
-Version `0.1.0` was a Pi package installed with `pi install npm:engineering-harness-skills`. That distribution is replaced by the standalone CLI in `0.2.0`. Migrate with:
+The legacy distribution was installed as a Pi package with `pi install npm:engineering-harness-skills`. Migrate by removing that entry, then installing the standalone CLI:
 
 ```sh
 pi remove npm:engineering-harness-skills
 npm install -g --ignore-scripts engineering-harness-skills
 ```
 
-The old Pi-package install remains available only by pinning `engineering-harness-skills@0.1.0` as a rollback path. It required a separately installed `pi` executable and is not the supported installation method.
+The legacy Pi-package path required a separately installed `pi` executable and is not supported for new installations.
+
+## Homebrew
+
+After a release is synchronized to the public tap, install the CLI with:
+
+```sh
+brew tap jwoo0122/tap
+brew install engineering-harness
+```
+
+The Formula depends on Homebrew's Node package and installs the published npm package and its runtime dependencies automatically. Formula versions and checksums are maintained by the release workflow; do not edit them manually.
 
 ## Optional legacy installer
 
-`install.sh` remains for existing Codex and Agent Skills users who intentionally manage those resources in their tool-specific directories. It is not required for the standalone CLI and does not install the CLI. The CLI is the supported way to run the Harness with its own Pi runtime.
+`install.sh` remains for existing Codex and Agent Skills users who intentionally manage those resources in their tool-specific directories. It installs the packaged runtime guidance from `resources/AGENTS.md`, not this repository's contributor instructions. It is not required for the standalone CLI and does not install the CLI.
 
 ## Verify the project
 
@@ -123,16 +134,21 @@ npm ci --ignore-scripts
 npm test
 ```
 
-`tests/test-install.sh` covers the legacy resource installer. `tests/test-standalone-cli.sh` packs the npm artifact, installs it into a disposable prefix, removes any global `pi` from `PATH`, verifies the standalone binary and resource provenance, checks state isolation from `~/.pi`, and uses a local mock model to prove a delegated child re-enters the bundled wrapper.
+`tests/test-install.sh` covers the legacy resource installer. `tests/test-standalone-cli.sh` packs the npm artifact, installs it into a disposable prefix, removes any global `pi` from `PATH`, verifies the standalone binary and resource provenance, checks state isolation from `~/.pi`, and uses a local mock model to prove a delegated child re-enters the bundled wrapper. `tests/test-release-automation.sh` validates Conventional Commit release configuration and the token-gated Homebrew Formula synchronizer without external network calls.
 
 ## Repository layout
 
 ```text
 .
+├── AGENTS.md                   # contributor guidance
+├── CONTRIBUTING.md              # Conventional Commit and release policy
+├── resources/AGENTS.md         # runtime guidance packaged for Harness agents
 ├── bin/engineering-harness.js  # npm CLI entry point
 ├── lib/launcher.js             # Node guard, state bootstrap, bundled Pi launcher
 ├── .agents/skills/             # bundled workflow skills
 ├── .pi/agents/                 # bundled Harness subagent roles
+├── .github/workflows/release.yml
+├── scripts/sync-homebrew-formula.mjs
 ├── docs/adr/                   # durable architecture decisions
 ├── install.sh                  # optional legacy resource installer
 └── tests/
