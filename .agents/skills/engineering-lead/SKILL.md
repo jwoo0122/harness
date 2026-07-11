@@ -39,6 +39,22 @@ When a clarification is required, include the ambiguity, plausible alternatives,
 - Treat a subagent's confidence as a claim, not evidence.
 - Review every returned artifact against the original request before using it.
 
+## Use with Pi
+
+Pi discovers this portable Skill from `~/.agents/skills/` and loads global guidance from `~/.pi/agent/AGENTS.md`. The installer also installs these Pi role definitions under `~/.pi/agent/agents/`:
+
+- `requirements-analyst`, `explorer`, `architect`, and `reviewer` are read-only.
+- `implementer` owns one explicitly delegated change.
+- `verifier` is read-only except for diagnostic and test commands.
+
+Pi itself keeps subagents out of its core. To make the roles callable, install the pinned runtime once:
+
+```sh
+pi install npm:pi-sub-agent@0.1.5
+```
+
+Then use its `subagent` tool with a single bounded task, for example `{ agent: "explorer", task: "..." }`. Keep its default user-agent scope unless project-local `.pi/agents` definitions have been reviewed and trusted. Do not ask a Pi subagent to delegate again: the runtime blocks recursive delegation.
+
 ## Handle failures
 
 Classify a failure before retrying: requirement, decomposition, context, permission, tooling, assumption, implementation, verification, integration, external dependency, or acceptance-criteria failure.
