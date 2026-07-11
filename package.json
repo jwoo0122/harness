@@ -1,0 +1,46 @@
+{
+  "name": "engineering-harness-skills",
+  "version": "0.1.0",
+  "description": "Requirements refinement, ADR-centered engineering workflows, and bounded Pi subagents",
+  "type": "module",
+  "license": "MIT",
+  "author": "jwoo0122",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jwoo0122/engineering-harness-skills.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jwoo0122/engineering-harness-skills/issues"
+  },
+  "homepage": "https://github.com/jwoo0122/engineering-harness-skills#readme",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "keywords": [
+    "pi-package",
+    "pi-skill",
+    "engineering-workflow",
+    "adr",
+    "requirements-refinement"
+  ],
+  "files": [
+    ".agents/skills",
+    "README.md",
+    "LICENSE",
+    "THIRD-PARTY-NOTICES.md"
+  ],
+  "dependencies": {
+    "pi-sub-agent": "0.1.5"
+  },
+  "bundledDependencies": [
+    "pi-sub-agent"
+  ],
+  "pi": {
+    "extensions": [
+      "./node_modules/pi-sub-agent/extensions/index.ts"
+    ],
+    "skills": [
+      "./.agents/skills"
+    ]
+  }
+}
