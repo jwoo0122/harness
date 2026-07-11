@@ -1,174 +1,147 @@
-# Engineering Harness for Codex and Pi
+# Engineering Harness
 
-An installable engineering-lead workflow for Codex, Pi, and Agent Skills-compatible tools.
+A standalone engineering-agent CLI for requirements refinement, ADR-centered design, bounded delegation, and evidence-based delivery.
 
-It helps an agent turn ambiguous software requests into bounded work, delegate safely, implement the smallest coherent change, and prove completion with evidence.
+`engineering-harness` is an external harness, like Gajae-Code: it runs beside the repository you choose instead of installing itself as a Pi package or modifying another agent's runtime. The npm package installs its pinned Pi runtime and `pi-sub-agent` dependency automatically, so users do **not** install `pi` or `pi-sub-agent` separately.
 
-## What it installs
+## Install
 
-The harness has four layers:
+### Requirements
 
-| Layer | Purpose | Installed location |
-| --- | --- | --- |
-| Global guidance | Durable lead-engineer rules that apply to every task | `~/.codex/AGENTS.md` |
-| Agent Skills | Lead, requirements-refinement, glossary, and ADR workflows | `~/.agents/skills/*` |
-| Codex personas | Native specialist roles for bounded subagent work | `~/.codex/agents/*.toml` |
-| Pi resources | Guidance and specialist roles for Pi sessions | `~/.pi/agent/AGENTS.md`, `~/.pi/agent/agents/*.md` |
+- Node.js **22.19.0 or newer**
+- npm (normally included with Node.js)
 
-The same skills are also published as a Pi package. The package bundles the `pi-sub-agent` runtime, so Pi users do not need a second runtime installation.
-
-## Quick start
-
-### Codex and Agent Skills-compatible tools
-
-Requirements:
-
-- Codex CLI or desktop app
-- macOS or another POSIX-compatible environment
-- `curl`, `tar`, and standard POSIX shell tools such as `sh`, `awk`, `diff`, and `mktemp`
-
-Install with one command; cloning the repository is not required:
+The CLI validates the active Node.js version before it loads the runtime. An unsupported version prints the detected executable and the required version, then exits without starting the harness.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/jwoo0122/engineering-harness-skills/main/install.sh | sh
+npm install -g --ignore-scripts engineering-harness-skills
+engineering-harness
 ```
 
-The bootstrap downloads a temporary source archive, runs the repository installer, and removes the archive afterward. Start a new task and invoke the lead workflow explicitly when useful:
-
-```text
-Use $engineering-lead to implement this request and prove every acceptance criterion.
-```
-
-### Pi package
-
-Install the package once. It exposes the engineering skills and bundles the `subagent` extension and its runtime:
+Use an API-key environment variable supported by Pi, or authenticate interactively:
 
 ```sh
-pi install npm:engineering-harness-skills
+export ANTHROPIC_API_KEY=sk-ant-...
+engineering-harness
+
+# Or start the harness, then run:
+/login
 ```
 
-For local development, run `pi install ./ -l` from this checkout. Then start Pi in a trusted project and use `/skill:engineering-lead`, `/skill:grill-with-docs`, or the `subagent` tool. Do **not** separately install `pi-sub-agent`; it is bundled by this package. The child process still requires the `pi` executable and credentials for the selected model.
+The underlying Pi command-line flags remain available. For example:
 
-## How the workflow behaves
+```sh
+engineering-harness "Inspect this repository and define acceptance criteria."
+engineering-harness -p "Summarize the current architecture."
+engineering-harness --model anthropic/claude-sonnet-4-5
+engineering-harness --pi-help
+```
+
+## What the CLI owns
+
+The command launches the bundled `@earendil-works/pi-coding-agent@0.80.6` directly, with absolute paths to the bundled Harness skills and `pi-sub-agent` extension. Its subagents re-execute the same wrapper, so they use the bundled runtime rather than searching `PATH` for a global `pi` executable.
+
+Harness state is isolated from Pi's normal state:
+
+| State | Location |
+| --- | --- |
+| Authentication, settings, trust decisions, and sessions | `~/.engineering-harness/agent/` |
+| Harness-owned subagent roles | `~/.engineering-harness/agent/agents/` |
+| Bundled skills and global Harness guidance | Loaded from the installed package |
+
+Set `ENGINEERING_HARNESS_AGENT_DIR` to use a different state directory. The launcher deliberately ignores an inherited `PI_CODING_AGENT_DIR`, so a globally installed Pi cannot accidentally supply credentials, extensions, sessions, or settings to the Harness. Existing Pi credentials are not copied; use `/login` in `engineering-harness` or provider API-key environment variables.
+
+On first launch, the Harness installs its six role definitions into its own state directory. It preserves customized role files during normal launches. Inspect or deliberately refresh them with:
+
+```sh
+engineering-harness setup --check
+engineering-harness setup --force
+```
+
+## Project trust and safety
+
+Pi's project-trust behavior remains intact for project-local `.pi` resources; review them before approving. The Harness disables automatic Skill discovery so an ambient `~/.agents/skills` entry cannot override its bundled workflow. Add an extra reviewed Skill explicitly with Pi's `--skill <path>` flag. For a one-off non-interactive run, pass Pi's `--approve` or `--no-approve` flag deliberately.
+
+The Harness runs with your user permissions. Bundled skills, project instructions, extensions, and delegated tasks can direct the agent to execute commands or edit files. Use only in repositories you trust, review model output, and avoid providing credentials with more scope than the task requires.
+
+## Included workflow
 
 The lead agent:
 
-1. Inspects the repository, existing instructions, tests, and current behavior.
+1. Inspects relevant source, callers, tests, CI, documentation, and working-tree state.
 2. Defines the goal, current state, gap, constraints, non-goals, acceptance criteria, evidence, assumptions, and risks.
-3. Uses `grill-with-docs` when requirements or design branches need refinement: facts are inspected, decisions are asked one at a time, and the user confirms the shared understanding before implementation.
-4. Maintains a concise `CONTEXT.md` glossary as project terms become precise.
-5. Records only hard-to-reverse, surprising, trade-off-driven decisions as sequential ADRs under `docs/adr/`.
-6. Decomposes work into independently verifiable outcomes and delegates only bounded work.
-7. Implements the smallest coherent change, runs focused and integration verification, and reviews the integrated result.
-8. Reports incomplete or blocked work honestly.
+3. Refines material ambiguity before mutation.
+4. Records durable terms in `CONTEXT.md` and hard-to-reverse decisions as ADRs when warranted.
+5. Delegates only bounded, independently verifiable work.
+6. Implements the smallest coherent change, verifies focused and integration behavior, and reviews the final diff.
 
-## Included personas
+Bundled skills:
 
-| Persona | Default access | Responsibility |
-| --- | --- | --- |
-| `requirements_analyst` | Read-only | Extract outcomes, constraints, non-goals, ambiguity, and acceptance criteria |
-| `explorer` | Read-only | Trace current behavior, dependencies, tests, and repository conventions |
-| `architect` | Read-only | Compare bounded designs, contracts, migration, rollback, and operational cost |
-| `implementer` | Workspace write | Make one scoped code change and its focused tests |
-| `verifier` | Read-only | Reproduce behavior and test acceptance, boundary, and negative scenarios |
-| `reviewer` | Read-only | Seek correctness, security, data, concurrency, operational, and regression risks |
+- `engineering-lead`
+- `grill-with-docs`
+- `grilling`
+- `domain-modeling`
 
-The same six roles are installed for Pi as Markdown agent definitions by the shell installer. The Pi package bundles `pi-sub-agent`, whose built-in roles are available immediately through the `subagent` tool; the shell installer additionally provisions the harness-specific roles. The extension runs each delegation in an isolated Pi process, removes recursive delegation, and defaults to user-level agent definitions. Do not enable project-local agent definitions unless that repository is trusted and those prompts have been reviewed.
+Bundled Harness roles:
 
-The portable Skills also contain equivalent persona contracts for tools that support `.agents/skills` but not Codex custom-agent TOML files.
+- `requirements-analyst`
+- `explorer`
+- `architect`
+- `implementer`
+- `verifier`
+- `reviewer`
 
-## Safe installation behavior
+Use `/skill:engineering-lead` in an interactive session when the task needs the full workflow. The `subagent` tool is available immediately and launches isolated child Harness processes.
 
-`./install.sh` is idempotent and does not edit `~/.codex/config.toml`.
+## Update and migration
 
-It:
-
-- Adds a clearly marked managed block to `~/.codex/AGENTS.md`.
-- Preserves guidance outside that block.
-- Installs all harness-owned Skills under the standard `$HOME/.agents/skills` path, including `grill-with-docs`, `grilling`, and `domain-modeling`.
-- Installs only the six harness-owned Codex persona files.
-- Installs only the six harness-owned Pi role files and preserves unrelated Pi roles.
-- Preserves unrelated custom personas.
-- Backs up conflicting managed files under `~/.codex/engineering-harness/backups`.
-- Refuses malformed managed markers and unsafe path collisions without changing the affected file.
-
-Preview or verify an installation:
+Update the CLI and its bundled runtime together:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/jwoo0122/engineering-harness-skills/main/install.sh | sh -s -- --dry-run
-curl -fsSL https://raw.githubusercontent.com/jwoo0122/engineering-harness-skills/main/install.sh | sh -s -- --check
+npm install -g --ignore-scripts engineering-harness-skills
 ```
 
-Use alternate roots in tests or managed environments:
+Do not run `pi update` for this installation.
+
+Version `0.1.0` was a Pi package installed with `pi install npm:engineering-harness-skills`. That distribution is replaced by the standalone CLI in `0.2.0`. Migrate with:
 
 ```sh
-# From a cloned checkout:
-HARNESS_HOME=/tmp/harness-home ./install.sh
-CODEX_HOME=/custom/codex AGENTS_HOME=/custom/agents PI_HOME=/custom/pi ./install.sh
-
-# One-command installation:
-curl -fsSL https://raw.githubusercontent.com/jwoo0122/engineering-harness-skills/main/install.sh | HARNESS_HOME=/tmp/harness-home sh
-curl -fsSL https://raw.githubusercontent.com/jwoo0122/engineering-harness-skills/main/install.sh | CODEX_HOME=/custom/codex AGENTS_HOME=/custom/agents PI_HOME=/custom/pi sh
+pi remove npm:engineering-harness-skills
+npm install -g --ignore-scripts engineering-harness-skills
 ```
 
-## Update
+The old Pi-package install remains available only by pinning `engineering-harness-skills@0.1.0` as a rollback path. It required a separately installed `pi` executable and is not the supported installation method.
 
-For the shell-installed resources, run the same one-command installer again:
+## Optional legacy installer
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/jwoo0122/engineering-harness-skills/main/install.sh | sh
-```
-
-For Pi package resources, use Pi's package updater:
-
-```sh
-pi update npm:engineering-harness-skills
-```
-
-Only changed shell-installer files are replaced, and replaced versions are backed up.
+`install.sh` remains for existing Codex and Agent Skills users who intentionally manage those resources in their tool-specific directories. It is not required for the standalone CLI and does not install the CLI. The CLI is the supported way to run the Harness with its own Pi runtime.
 
 ## Verify the project
 
-Run the isolated installer acceptance test:
-
 ```sh
-./tests/test-install.sh
+npm ci --ignore-scripts
+npm test
 ```
 
-The test covers initial installation, preservation of existing guidance, idempotent reinstall, drift detection and repair, backup creation, malformed-marker rejection, path-collision safety, and remote bootstrap. `./tests/test-pi-package.sh` verifies the npm manifest, bundled runtime, and packaged Skills.
+`tests/test-install.sh` covers the legacy resource installer. `tests/test-standalone-cli.sh` packs the npm artifact, installs it into a disposable prefix, removes any global `pi` from `PATH`, verifies the standalone binary and resource provenance, checks state isolation from `~/.pi`, and uses a local mock model to prove a delegated child re-enters the bundled wrapper.
 
 ## Repository layout
 
 ```text
 .
-├── AGENTS.md
-├── install.sh
-├── package.json              # Pi package manifest
-├── package-lock.json
-├── .agents/skills/
-│   ├── engineering-lead/
-│   ├── grill-with-docs/
-│   ├── grilling/
-│   └── domain-modeling/
-├── .codex/agents/
-├── .pi/agents/
-├── docs/adr/                 # durable architecture decisions
-├── tests/
-│   ├── test-install.sh
-│   └── test-pi-package.sh
-└── THIRD-PARTY-NOTICES.md
+├── bin/engineering-harness.js  # npm CLI entry point
+├── lib/launcher.js             # Node guard, state bootstrap, bundled Pi launcher
+├── .agents/skills/             # bundled workflow skills
+├── .pi/agents/                 # bundled Harness subagent roles
+├── docs/adr/                   # durable architecture decisions
+├── install.sh                  # optional legacy resource installer
+└── tests/
 ```
 
-## Compatibility notes
+## Compatibility
 
-- Codex and Pi discover personal Skills from `$HOME/.agents/skills` and repository Skills from `.agents/skills`.
-- Codex discovers personal custom agents from `~/.codex/agents` and project custom agents from `.codex/agents`.
-- Pi loads `AGENTS.md` from `~/.pi/agent/AGENTS.md`, discovers package Skills through `package.json`, and loads the bundled `pi-sub-agent` extension from the package manifest.
-- Custom-agent TOML is Codex-specific; Pi role Markdown is specific to `pi-sub-agent`; the Skills follow the portable Agent Skills directory structure.
-- The package follows the current Pi 0.80 runtime floor: Node.js 22.19 or newer. The bundled `pi-sub-agent@0.1.5` also requires the `pi` executable for child processes.
-
-See the official Codex documentation for [Skill locations](https://learn.chatgpt.com/docs/build-skills#where-to-save-skills), [custom agents](https://learn.chatgpt.com/docs/agent-configuration/subagents#custom-agents), and [`AGENTS.md` guidance](https://learn.chatgpt.com/docs/customization/overview#agents-guidance). For Pi, see [packages](https://pi.dev/docs/latest/packages), [context files](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/README.md#context-files), [skills](https://pi.dev/docs/latest/skills), and [extensions](https://pi.dev/docs/latest/extensions).
-
-## License
+- The bundled Pi runtime requires Node.js **22.19.0 or newer**.
+- macOS, Linux, and Windows are supported wherever that Node.js version and npm are supported.
+- A model credential is still required: `/login` stores it in Harness-owned state, while provider API-key environment variables work without persistent credentials.
 
 Released under the [MIT License](LICENSE).

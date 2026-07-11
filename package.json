@@ -1,7 +1,7 @@
 {
   "name": "engineering-harness-skills",
-  "version": "0.1.0",
-  "description": "Requirements refinement, ADR-centered engineering workflows, and bounded Pi subagents",
+  "version": "0.2.0",
+  "description": "Standalone engineering harness CLI with bundled Pi runtime and bounded subagents",
   "type": "module",
   "license": "MIT",
   "author": "jwoo0122",
@@ -17,30 +17,30 @@
     "node": ">=22.19.0"
   },
   "keywords": [
-    "pi-package",
-    "pi-skill",
+    "engineering-harness",
+    "coding-agent",
     "engineering-workflow",
     "adr",
     "requirements-refinement"
   ],
+  "bin": {
+    "engineering-harness": "bin/engineering-harness.js"
+  },
   "files": [
+    "AGENTS.md",
     ".agents/skills",
+    ".pi/agents",
+    "bin",
+    "lib",
     "README.md",
     "LICENSE",
     "THIRD-PARTY-NOTICES.md"
   ],
-  "dependencies": {
-    "pi-sub-agent": "0.1.5"
+  "scripts": {
+    "test": "./tests/test-install.sh && ./tests/test-standalone-cli.sh"
   },
-  "bundledDependencies": [
-    "pi-sub-agent"
-  ],
-  "pi": {
-    "extensions": [
-      "./node_modules/pi-sub-agent/extensions/index.ts"
-    ],
-    "skills": [
-      "./.agents/skills"
-    ]
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "0.80.6",
+    "pi-sub-agent": "0.1.5"
   }
 }
