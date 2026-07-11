@@ -19,11 +19,18 @@ grep -F '<!-- engineering-harness:start -->' "$TEST_HOME/.codex/AGENTS.md" >/dev
 grep -F '# Existing personal guidance' "$TEST_HOME/.codex/AGENTS.md" >/dev/null
 [ "$(grep -c '<!-- engineering-harness:start -->' "$TEST_HOME/.codex/AGENTS.md")" -eq 1 ]
 [ -f "$TEST_HOME/.agents/skills/engineering-lead/SKILL.md" ]
+for skill in grill-with-docs grilling domain-modeling; do
+  [ -f "$TEST_HOME/.agents/skills/$skill/SKILL.md" ]
+done
+[ -f "$TEST_HOME/.agents/skills/domain-modeling/references/ADR-FORMAT.md" ]
+[ -f "$TEST_HOME/.agents/skills/domain-modeling/references/CONTEXT-FORMAT.md" ]
+grep -F 'Do not implement' "$TEST_HOME/.agents/skills/grill-with-docs/SKILL.md" >/dev/null
 [ -f "$TEST_HOME/.codex/agents/implementer.toml" ]
 [ -f "$TEST_HOME/.pi/agent/agents/implementer.md" ]
 [ -f "$TEST_HOME/.pi/agent/AGENTS.md" ]
 [ "$(grep -c '<!-- engineering-harness:start -->' "$TEST_HOME/.pi/agent/AGENTS.md")" -eq 1 ]
 [ -d "$TEST_HOME/.codex/engineering-harness/backups" ]
+grep -F 'engineering-harness-skills' "$TEST_HOME/.agents/skills/engineering-lead/SKILL.md" >/dev/null
 
 for role in requirements-analyst explorer architect implementer verifier reviewer; do
   role_file="$TEST_HOME/.pi/agent/agents/$role.md"
@@ -136,6 +143,8 @@ printf '%s\n' '# decoy skill from the current directory' > "$REMOTE_WORK/.agents
     sh -s -- --check >/dev/null
 )
 [ -f "$REMOTE_HOME/.agents/skills/engineering-lead/SKILL.md" ]
+[ -f "$REMOTE_HOME/.agents/skills/grill-with-docs/SKILL.md" ]
+[ -f "$REMOTE_HOME/.agents/skills/domain-modeling/references/ADR-FORMAT.md" ]
 [ -f "$REMOTE_HOME/.codex/agents/implementer.toml" ]
 [ -f "$REMOTE_HOME/.pi/agent/agents/implementer.md" ]
 cmp -s "$ROOT/.agents/skills/engineering-lead/SKILL.md" "$REMOTE_HOME/.agents/skills/engineering-lead/SKILL.md"
@@ -162,5 +171,10 @@ if (
 fi
 [ ! -e "$INVALID_HOME/.codex" ]
 [ -z "$(find "$INVALID_TMP" -mindepth 1 -maxdepth 1 -print -quit)" ]
+
+if grep -R -F 'pi install npm:pi-sub-agent' "$ROOT/README.md" "$ROOT/install.sh" "$ROOT/.agents/skills" >/dev/null; then
+  printf '%s\n' 'found a stale separate pi-sub-agent installation instruction' >&2
+  exit 1
+fi
 
 printf '%s\n' 'Installer acceptance test passed.'

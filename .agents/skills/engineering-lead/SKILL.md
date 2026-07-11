@@ -39,6 +39,10 @@ When a clarification is required, include the ambiguity, plausible alternatives,
 - Treat a subagent's confidence as a claim, not evidence.
 - Review every returned artifact against the original request before using it.
 
+## Requirements refinement and ADRs
+
+When the request or design has unresolved branches, use `/skill:grill-with-docs` before implementing. It asks one question at a time, distinguishes repository facts from user decisions, updates the project glossary as terms become precise, and records qualifying architectural decisions in `docs/adr/`. Do not implement until the user confirms the shared understanding.
+
 ## Use with Pi
 
 Pi discovers this portable Skill from `~/.agents/skills/` and loads global guidance from `~/.pi/agent/AGENTS.md`. The installer also installs these Pi role definitions under `~/.pi/agent/agents/`:
@@ -47,13 +51,13 @@ Pi discovers this portable Skill from `~/.agents/skills/` and loads global guida
 - `implementer` owns one explicitly delegated change.
 - `verifier` is read-only except for diagnostic and test commands.
 
-Pi itself keeps subagents out of its core. To make the roles callable, install the pinned runtime once:
+Pi itself keeps subagents out of its core. Install this repository as a Pi package to get the engineering skills and the bundled `subagent` runtime in one step:
 
 ```sh
-pi install npm:pi-sub-agent@0.1.5
+pi install npm:engineering-harness-skills
 ```
 
-Then use its `subagent` tool with a single bounded task, for example `{ agent: "explorer", task: "..." }`. Keep its default user-agent scope unless project-local `.pi/agents` definitions have been reviewed and trusted. Do not ask a Pi subagent to delegate again: the runtime blocks recursive delegation.
+For local development, use `pi install ./ -l` from this repository. Then use the `subagent` tool with a single bounded task, for example `{ agent: "explorer", task: "..." }`. Keep its default user-agent scope unless project-local `.pi/agents` definitions have been reviewed and trusted. Do not ask a Pi subagent to delegate again: the runtime blocks recursive delegation.
 
 ## Handle failures
 

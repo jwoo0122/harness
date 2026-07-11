@@ -24,11 +24,12 @@ esac
 [ "$#" -le 1 ] || { usage >&2; exit 2; }
 
 SOURCE_AGENTS="$SCRIPT_DIR/AGENTS.md"
-SOURCE_SKILL="$SCRIPT_DIR/.agents/skills/engineering-lead"
+SOURCE_SKILLS="$SCRIPT_DIR/.agents/skills"
+SOURCE_SKILL="$SOURCE_SKILLS/engineering-lead"
 SOURCE_PERSONAS="$SCRIPT_DIR/.codex/agents"
 SOURCE_PI_AGENTS="$SCRIPT_DIR/.pi/agents"
 TARGET_AGENTS="$CODEX_HOME/AGENTS.md"
-TARGET_SKILL="$AGENTS_HOME/skills/engineering-lead"
+TARGET_SKILLS="$AGENTS_HOME/skills"
 TARGET_PERSONAS="$CODEX_HOME/agents"
 TARGET_PI_AGENTS="$PI_HOME/agent/agents"
 TARGET_PI_GUIDANCE="$PI_HOME/agent/AGENTS.md"
@@ -48,6 +49,7 @@ say() {
 
 sources_available() {
   [ -f "$SOURCE_AGENTS" ] &&
+    [ -d "$SOURCE_SKILLS" ] &&
     [ -f "$SOURCE_SKILL/SKILL.md" ] &&
     [ -d "$SOURCE_PERSONAS" ]
 }
@@ -58,6 +60,7 @@ running_from_source_tree() {
 
 require_sources() {
   [ -f "$SOURCE_AGENTS" ] || fail "missing source: $SOURCE_AGENTS"
+  [ -d "$SOURCE_SKILLS" ] || fail "missing source: $SOURCE_SKILLS"
   [ -f "$SOURCE_SKILL/SKILL.md" ] || fail "missing source: $SOURCE_SKILL/SKILL.md"
   [ -d "$SOURCE_PERSONAS" ] || fail "missing source: $SOURCE_PERSONAS"
   [ -d "$SOURCE_PI_AGENTS" ] || fail "missing source: $SOURCE_PI_AGENTS"
@@ -184,6 +187,15 @@ install_tree() {
   say "Installed $target_dir"
 }
 
+install_skills() {
+  mkdir -p "$TARGET_SKILLS"
+  for source_skill in "$SOURCE_SKILLS"/*; do
+    [ -d "$source_skill" ] || continue
+    name=$(basename "$source_skill")
+    install_tree "$source_skill" "$TARGET_SKILLS/$name" "skills/$name"
+  done
+}
+
 install_personas() {
   mkdir -p "$TARGET_PERSONAS"
   for source_file in "$SOURCE_PERSONAS"/*.toml; do
@@ -247,7 +259,11 @@ check_install() {
   check_temp_file=$(mktemp "${TMPDIR:-/tmp}/engineering-harness-check.XXXXXX")
   extract_managed_agents "$TARGET_AGENTS" > "$check_temp_file" || fail "managed AGENTS.md block is missing or incomplete"
   cmp -s "$SOURCE_AGENTS" "$check_temp_file" || fail "managed AGENTS.md block is stale"
-  diff -qr "$SOURCE_SKILL" "$TARGET_SKILL" >/dev/null 2>&1 || fail "engineering-lead skill is missing or stale"
+  for source_skill in "$SOURCE_SKILLS"/*; do
+    [ -d "$source_skill" ] || continue
+    skill_name=$(basename "$source_skill")
+    diff -qr "$source_skill" "$TARGET_SKILLS/$skill_name" >/dev/null 2>&1 || fail "skill is missing or stale: $TARGET_SKILLS/$skill_name"
+  done
   for source_file in "$SOURCE_PERSONAS"/*.toml; do
     target_file=$TARGET_PERSONAS/$(basename "$source_file")
     cmp -s "$source_file" "$target_file" || fail "persona is missing or stale: $target_file"
@@ -268,7 +284,7 @@ check_install() {
 
 dry_run() {
   say "Would manage guidance in $TARGET_AGENTS"
-  say "Would install skill in $TARGET_SKILL"
+  say "Would install skills in $TARGET_SKILLS"
   say "Would install Codex personas in $TARGET_PERSONAS"
   say "Would manage Pi guidance in $TARGET_PI_GUIDANCE"
   say "Would install Pi agent roles in $TARGET_PI_AGENTS"
@@ -283,13 +299,13 @@ case $MODE in
   dry-run) dry_run ;;
   install)
     write_managed_agents "$TARGET_AGENTS" "codex/AGENTS.md"
-    install_tree "$SOURCE_SKILL" "$TARGET_SKILL" "skill/engineering-lead"
+    install_skills
     install_personas
     write_managed_agents "$TARGET_PI_GUIDANCE" "pi/AGENTS.md"
     install_pi_agents
     check_install
     say "Codex: Use \$engineering-lead to lead and verify this work."
-    say "Pi: install the pinned sub-agent runtime once with: pi install npm:pi-sub-agent@0.1.5"
-    say "Then ask Pi to use the engineering-lead skill and delegate only bounded work to the installed roles."
+    say "Pi package: install npm:engineering-harness-skills to get the skills and bundled subagent runtime in one step."
+    say "Then ask Pi to use the engineering-lead or grill-with-docs skill and delegate only bounded work."
     ;;
 esac
