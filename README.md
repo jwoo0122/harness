@@ -24,15 +24,15 @@ Requirements:
 
 - Codex CLI or desktop app
 - macOS or another POSIX-compatible environment
-- Standard shell tools such as `sh`, `awk`, `diff`, and `mktemp`
+- `curl`, `tar`, and standard POSIX shell tools such as `sh`, `awk`, `diff`, and `mktemp`
 
-Clone and install:
+Install with one command; cloning the repository is not required:
 
 ```sh
-git clone https://github.com/jwoo0122/engineering-harness-skills.git
-cd engineering-harness-skills
-./install.sh
+curl -fsSL https://raw.githubusercontent.com/jwoo0122/engineering-harness-skills/main/install.sh | sh
 ```
+
+The bootstrap downloads a temporary source archive from GitHub, runs the same repository installer, and removes the archive afterward.
 
 Start a new Codex task after installation. The Skill can trigger automatically for non-trivial engineering work, or you can invoke it explicitly:
 
@@ -95,24 +95,28 @@ It:
 Preview or verify an installation:
 
 ```sh
-./install.sh --dry-run
-./install.sh --check
+curl -fsSL https://raw.githubusercontent.com/jwoo0122/engineering-harness-skills/main/install.sh | sh -s -- --dry-run
+curl -fsSL https://raw.githubusercontent.com/jwoo0122/engineering-harness-skills/main/install.sh | sh -s -- --check
 ```
 
 Use alternate roots in tests or managed environments:
 
 ```sh
+# From a cloned checkout:
 HARNESS_HOME=/tmp/harness-home ./install.sh
 CODEX_HOME=/custom/codex AGENTS_HOME=/custom/agents PI_HOME=/custom/pi ./install.sh
+
+# One-command installation:
+curl -fsSL https://raw.githubusercontent.com/jwoo0122/engineering-harness-skills/main/install.sh | HARNESS_HOME=/tmp/harness-home sh
+curl -fsSL https://raw.githubusercontent.com/jwoo0122/engineering-harness-skills/main/install.sh | CODEX_HOME=/custom/codex AGENTS_HOME=/custom/agents PI_HOME=/custom/pi sh
 ```
 
 ## Update
 
-Pull the latest version and run the same installer again:
+Run the same one-command installer again:
 
 ```sh
-git pull --ff-only
-./install.sh
+curl -fsSL https://raw.githubusercontent.com/jwoo0122/engineering-harness-skills/main/install.sh | sh
 ```
 
 Only changed harness files are replaced, and replaced versions are backed up.
