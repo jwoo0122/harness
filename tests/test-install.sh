@@ -20,7 +20,37 @@ grep -F '# Existing personal guidance' "$TEST_HOME/.codex/AGENTS.md" >/dev/null
 [ "$(grep -c '<!-- engineering-harness:start -->' "$TEST_HOME/.codex/AGENTS.md")" -eq 1 ]
 [ -f "$TEST_HOME/.agents/skills/engineering-lead/SKILL.md" ]
 [ -f "$TEST_HOME/.codex/agents/implementer.toml" ]
+[ -f "$TEST_HOME/.pi/agent/agents/implementer.md" ]
+[ -f "$TEST_HOME/.pi/agent/AGENTS.md" ]
+[ "$(grep -c '<!-- engineering-harness:start -->' "$TEST_HOME/.pi/agent/AGENTS.md")" -eq 1 ]
 [ -d "$TEST_HOME/.codex/engineering-harness/backups" ]
+
+for role in requirements-analyst explorer architect implementer verifier reviewer; do
+  role_file="$TEST_HOME/.pi/agent/agents/$role.md"
+  [ -f "$role_file" ]
+  grep -Fx "name: $role" "$role_file" >/dev/null
+  grep -E '^description: .+' "$role_file" >/dev/null
+done
+for role in requirements-analyst explorer architect reviewer; do
+  grep -Fx 'tools: read, grep, find, ls' "$TEST_HOME/.pi/agent/agents/$role.md" >/dev/null
+done
+grep -Fx 'tools: read, grep, find, ls, bash' "$TEST_HOME/.pi/agent/agents/verifier.md" >/dev/null
+
+printf '%s\n' '# Custom Pi role' > "$TEST_HOME/.pi/agent/agents/custom.md"
+HARNESS_HOME="$TEST_HOME" "$ROOT/install.sh" >/dev/null
+[ -f "$TEST_HOME/.pi/agent/agents/custom.md" ]
+
+printf '%s\n' '# Existing Pi guidance' > "$TEST_HOME/.pi/agent/AGENTS.md"
+HARNESS_HOME="$TEST_HOME" "$ROOT/install.sh" >/dev/null
+grep -F '# Existing Pi guidance' "$TEST_HOME/.pi/agent/AGENTS.md" >/dev/null
+
+printf '%s\n' '# stale' >> "$TEST_HOME/.pi/agent/agents/implementer.md"
+if HARNESS_HOME="$TEST_HOME" "$ROOT/install.sh" --check >/dev/null 2>&1; then
+  printf '%s\n' 'expected stale Pi agent check to fail' >&2
+  exit 1
+fi
+HARNESS_HOME="$TEST_HOME" "$ROOT/install.sh" >/dev/null
+HARNESS_HOME="$TEST_HOME" "$ROOT/install.sh" --check >/dev/null
 
 printf '%s\n' '# stale' >> "$TEST_HOME/.codex/agents/implementer.toml"
 if HARNESS_HOME="$TEST_HOME" "$ROOT/install.sh" --check >/dev/null 2>&1; then
@@ -51,6 +81,15 @@ fi
 [ -d "$COLLISION_HOME/.codex/AGENTS.md" ]
 rm -rf "$COLLISION_HOME"
 
+PI_AGENT_COLLISION_HOME=$(mktemp -d "${TMPDIR:-/tmp}/engineering-harness-pi-agent-collision.XXXXXX")
+mkdir -p "$PI_AGENT_COLLISION_HOME/.pi/agent/agents/implementer.md"
+if HARNESS_HOME="$PI_AGENT_COLLISION_HOME" "$ROOT/install.sh" >/dev/null 2>&1; then
+  printf '%s\n' 'expected Pi agent path collision to fail' >&2
+  exit 1
+fi
+[ -d "$PI_AGENT_COLLISION_HOME/.pi/agent/agents/implementer.md" ]
+rm -rf "$PI_AGENT_COLLISION_HOME"
+
 STRAY_HOME=$(mktemp -d "${TMPDIR:-/tmp}/engineering-harness-stray.XXXXXX")
 HARNESS_HOME="$STRAY_HOME" "$ROOT/install.sh" >/dev/null
 printf '%s\n' '<!-- engineering-harness:end -->' >> "$STRAY_HOME/.codex/AGENTS.md"
@@ -69,7 +108,7 @@ rm -rf "$STRAY_HOME"
 FIXTURE_ROOT=$BOOTSTRAP_ROOT/archive/engineering-harness-fixture
 mkdir -p "$FIXTURE_ROOT"
 cp "$ROOT/install.sh" "$ROOT/AGENTS.md" "$FIXTURE_ROOT/"
-cp -R "$ROOT/.agents" "$ROOT/.codex" "$FIXTURE_ROOT/"
+cp -R "$ROOT/.agents" "$ROOT/.codex" "$ROOT/.pi" "$FIXTURE_ROOT/"
 ARCHIVE=$BOOTSTRAP_ROOT/engineering-harness.tar.gz
 tar -czf "$ARCHIVE" -C "$BOOTSTRAP_ROOT/archive" engineering-harness-fixture
 
@@ -98,7 +137,9 @@ printf '%s\n' '# decoy skill from the current directory' > "$REMOTE_WORK/.agents
 )
 [ -f "$REMOTE_HOME/.agents/skills/engineering-lead/SKILL.md" ]
 [ -f "$REMOTE_HOME/.codex/agents/implementer.toml" ]
+[ -f "$REMOTE_HOME/.pi/agent/agents/implementer.md" ]
 cmp -s "$ROOT/.agents/skills/engineering-lead/SKILL.md" "$REMOTE_HOME/.agents/skills/engineering-lead/SKILL.md"
+cmp -s "$ROOT/.pi/agents/implementer.md" "$REMOTE_HOME/.pi/agent/agents/implementer.md"
 [ -z "$(find "$REMOTE_TMP" -mindepth 1 -maxdepth 1 -print -quit)" ]
 
 INVALID_ROOT=$BOOTSTRAP_ROOT/invalid-archive/incomplete
