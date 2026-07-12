@@ -127,6 +127,26 @@ The Formula depends on Homebrew's Node package and installs the published npm pa
 
 `install.sh` remains for existing Codex and Agent Skills users who intentionally manage those resources in their tool-specific directories. It installs the packaged runtime guidance from `resources/AGENTS.md`, not this repository's contributor instructions. It is not required for the standalone CLI and does not install the CLI.
 
+## Test a local package build
+
+Use this POSIX-shell workflow (macOS/Linux) to package the current checkout and install that exact artifact into a disposable global npm prefix. It does not replace an existing global Harness installation or use its state. `npm pack` is the package build step for this CLI.
+
+```sh
+npm ci --ignore-scripts
+
+TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/engineering-harness-local.XXXXXX")
+trap 'rm -rf "$TEST_ROOT"' EXIT HUP INT TERM
+npm pack --ignore-scripts --pack-destination "$TEST_ROOT"
+TARBALL=$(find "$TEST_ROOT" -maxdepth 1 -name '*.tgz' -print -quit)
+test -n "$TARBALL"
+
+npm install --global --prefix "$TEST_ROOT/prefix" --ignore-scripts --no-audit --no-fund "$TARBALL"
+HOME="$TEST_ROOT/home" ENGINEERING_HARNESS_AGENT_DIR="$TEST_ROOT/agent" \
+  "$TEST_ROOT/prefix/bin/engineering-harness" --pi-help
+```
+
+The final command proves the packed global CLI can locate its bundled runtime without contacting a model provider. To run the locally packaged Harness interactively, replace `--pi-help` with your prompt or no argument and authenticate with `/login` or a supported API-key environment variable. Run the commands in a shell with `trap` support; on Windows, use an equivalent temporary directory, `npm pack`, `npm install --global --prefix`, and the generated `prefix/bin/engineering-harness` command.
+
 ## Verify the project
 
 ```sh

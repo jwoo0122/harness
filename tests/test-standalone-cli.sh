@@ -23,6 +23,11 @@ PROJECT_ROOT="$TEST_ROOT/project"
 NODE_ONLY_BIN="$TEST_ROOT/node-bin"
 mkdir -p "$INSTALL_ROOT" "$HOME_ROOT/.pi/agent/extensions" "$HOME_ROOT/.agents/skills/engineering-lead" "$PROJECT_ROOT" "$NODE_ONLY_BIN"
 ln -s "$(command -v node)" "$NODE_ONLY_BIN/node"
+# pnpm creates POSIX shell shims for package binaries. Supply only the
+# utilities required by those shims so PATH still cannot resolve a global pi.
+for command in dirname sed uname; do
+  ln -s "$(command -v "$command")" "$NODE_ONLY_BIN/$command"
+done
 printf '%s\n' 'throw new Error("global Pi state must not load")' > "$HOME_ROOT/.pi/agent/extensions/poison.ts"
 printf '%s\n' '---' 'name: engineering-lead' 'description: poison global skill must not load' '---' '# Poison' > "$HOME_ROOT/.agents/skills/engineering-lead/SKILL.md"
 
@@ -46,6 +51,29 @@ PACKAGE_INSTALL="$INSTALL_ROOT/lib/node_modules/@jwoo0122/engineering-harness-sk
 [ -x "$BIN" ]
 [ -d "$PACKAGE_INSTALL" ]
 [ ! -e "$NODE_ONLY_BIN/pi" ]
+
+PNPM="$ROOT/node_modules/.bin/pnpm"
+[ -x "$PNPM" ] || { printf '%s\n' 'pnpm test dependency is required for the standalone CLI test' >&2; exit 1; }
+PNPM_PROJECT="$TEST_ROOT/pnpm-project"
+PNPM_STORE="$TEST_ROOT/pnpm-store"
+PNPM_HOME="$TEST_ROOT/pnpm-home"
+mkdir -p "$PNPM_PROJECT" "$PNPM_HOME"
+printf '%s\n' '{"name":"engineering-harness-pnpm-test","private":true}' > "$PNPM_PROJECT/package.json"
+"$PNPM" --dir "$PNPM_PROJECT" add --ignore-scripts --config.node-linker=isolated --store-dir "$PNPM_STORE" "$TARBALL" >/dev/null
+PNPM_BIN="$PNPM_PROJECT/node_modules/.bin/engineering-harness"
+PNPM_PACKAGE="$PNPM_PROJECT/node_modules/@jwoo0122/engineering-harness-skills"
+[ -x "$PNPM_BIN" ]
+[ -d "$PNPM_PACKAGE" ]
+PNPM_PACKAGE_REAL=$(CDPATH= cd "$PNPM_PACKAGE" && pwd -P)
+[ ! -e "$PNPM_PACKAGE_REAL/node_modules/pi-sub-agent" ]
+[ ! -e "$PNPM_PACKAGE_REAL/node_modules/@earendil-works/pi-coding-agent" ]
+(
+  cd "$PROJECT_ROOT"
+  printf '%s\n' '{"id":"pnpm-commands","type":"get_commands"}' |
+    env -i HOME="$PNPM_HOME" PATH="$NODE_ONLY_BIN" PI_OFFLINE=1 "$PNPM_BIN" --mode rpc --no-session --approve > "$TEST_ROOT/pnpm-rpc-output.jsonl"
+)
+grep -F '"command":"get_commands"' "$TEST_ROOT/pnpm-rpc-output.jsonl" >/dev/null
+grep -F 'sub-agent-settings' "$TEST_ROOT/pnpm-rpc-output.jsonl" >/dev/null
 
 VERSION=$(env -i HOME="$HOME_ROOT" PATH="$NODE_ONLY_BIN" "$BIN" --version)
 EXPECTED_VERSION=$(PACKAGE_JSON="$(cat "$ROOT/package.json")" node --input-type=module -e 'import process from "node:process"; process.stdout.write(JSON.parse(process.env.PACKAGE_JSON).version)')
