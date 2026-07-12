@@ -1,5 +1,5 @@
 {
-  "name": "@jwoo0122/engineering-harness-skills",
+  "name": "@jwoo0122/harness",
   "version": "2.1.0",
   "description": "Standalone Harness CLI with bundled Pi runtime and bounded subagents",
   "type": "module",
@@ -7,12 +7,12 @@
   "author": "jwoo0122",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jwoo0122/engineering-harness-skills.git"
+    "url": "git+https://github.com/jwoo0122/harness.git"
   },
   "bugs": {
-    "url": "https://github.com/jwoo0122/engineering-harness-skills/issues"
+    "url": "https://github.com/jwoo0122/harness/issues"
   },
-  "homepage": "https://github.com/jwoo0122/engineering-harness-skills#readme",
+  "homepage": "https://github.com/jwoo0122/harness#readme",
   "engines": {
     "node": ">=22.19.0"
   },
