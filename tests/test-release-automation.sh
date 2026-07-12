@@ -153,6 +153,13 @@ grep -F 'branches: [main]' "$ROOT/.github/workflows/release.yml" >/dev/null
 grep -F 'fetch-depth: 0' "$ROOT/.github/workflows/release.yml" >/dev/null
 grep -F 'cancel-in-progress: false' "$ROOT/.github/workflows/release.yml" >/dev/null
 grep -F 'contents: write' "$ROOT/.github/workflows/release.yml" >/dev/null
+awk '
+  /^  release:$/ { in_release = 1; next }
+  in_release && /^  [[:alnum:]_-]+:$/ { exit }
+  in_release && /^    permissions:$/ { in_permissions = 1; next }
+  in_permissions && /^    [[:alnum:]_-]+:/ { exit }
+  in_permissions { print }
+' "$ROOT/.github/workflows/release.yml" | grep -Fx '      id-token: write' >/dev/null
 grep -F 'Verify Homebrew synchronization credentials' "$ROOT/.github/workflows/release.yml" >/dev/null
 grep -F 'persist-credentials: false' "$ROOT/.github/workflows/release.yml" >/dev/null
 grep -F 'actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5' "$ROOT/.github/workflows/release.yml" >/dev/null
@@ -161,6 +168,8 @@ grep -F 'NPM_TOKEN: ${{ secrets.NPM_TOKEN }}' "$ROOT/.github/workflows/release.y
 grep -F 'HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}' "$ROOT/.github/workflows/release.yml" >/dev/null
 grep -F 'All commits intended for `main`' "$ROOT/AGENTS.md" >/dev/null
 grep -F 'Conventional Commit' "$ROOT/CONTRIBUTING.md" >/dev/null
+grep -F '2FA bypass' "$ROOT/CONTRIBUTING.md" >/dev/null
+grep -F 'Trusted Publishing' "$ROOT/CONTRIBUTING.md" >/dev/null
 grep -F 'Act as the lead engineer responsible for delivering a working, verified result.' "$ROOT/resources/AGENTS.md" >/dev/null
 RELEASE_OUTPUT=$(mktemp "${TMPDIR:-/tmp}/engineering-harness-release-output.XXXXXX")
 trap 'rm -f "$RELEASE_OUTPUT"' EXIT HUP INT TERM
