@@ -1,3 +1,10 @@
+## [2.0.2](https://github.com/jwoo0122/engineering-harness-skills/compare/v2.0.1...v2.0.2) (2026-07-12)
+
+
+### Bug Fixes
+
+* trigger release ([74cda64](https://github.com/jwoo0122/engineering-harness-skills/commit/74cda64394d3a63799ae2dc0dcf2a3ef929e3a18))
+
 ## [2.0.1](https://github.com/jwoo0122/engineering-harness-skills/compare/v2.0.0...v2.0.1) (2026-07-12)
 
 
