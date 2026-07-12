@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { Type } from "typebox";
 import { createLocalBashOperations, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -32,17 +32,28 @@ function stateFor(cwd: string, workflowId: string) {
 }
 
 function writeState(workflow: ReturnType<typeof stateFor>, expectedRevision: number, update: (state: any) => void) {
-  if (workflow.state.revision !== expectedRevision) {
-    throw new Error(`Workflow revision changed from ${expectedRevision} to ${workflow.state.revision}; reload before retrying.`);
+  const lockPath = `${workflow.statePath}.lock`;
+  let lock;
+  try {
+    lock = openSync(lockPath, "wx", 0o600);
+    const current = JSON.parse(readFileSync(workflow.statePath, "utf8"));
+    if (current.revision !== expectedRevision) throw new Error(`Workflow revision changed from ${expectedRevision} to ${current.revision}; reload before retrying.`);
+    const next = structuredClone(current);
+    update(next);
+    next.revision += 1;
+    next.updatedAt = now();
+    const temporary = `${workflow.statePath}.${process.pid}.${next.revision}.tmp`;
+    writeFileSync(temporary, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
+    renameSync(temporary, workflow.statePath);
+    return next;
+  } finally {
+    if (lock !== undefined) closeSync(lock);
+    try { unlinkSync(lockPath); } catch {}
   }
-  const next = structuredClone(workflow.state);
-  update(next);
-  next.revision += 1;
-  next.updatedAt = now();
-  const temporary = `${workflow.statePath}.${process.pid}.${next.revision}.tmp`;
-  writeFileSync(temporary, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
-  renameSync(temporary, workflow.statePath);
-  return next;
+}
+
+function isCheckpointed(cwd: string, path: string) {
+  try { return execFileSync("git", ["show", `HEAD:${relative(cwd, path)}`], { cwd, encoding: "utf8" }) === readFileSync(path, "utf8"); } catch { return false; }
 }
 
 function isArtifactPath(cwd: string, value: unknown) {
@@ -111,7 +122,7 @@ export default function workflowGuardian(pi: ExtensionAPI) {
     timer = undefined;
   });
 
-  pi.on("user_bash", (event, ctx) => {
+  pi.on("user_bash", (_event, ctx) => {
     const workflow = selectedWorkflowId ? readLiveV2Workflow(ctx.cwd, selectedWorkflowId) : undefined;
     if (!workflow || workflow.state.phase !== "execution" || !Object.values(workflow.state.workUnits).some((unit: any) => unit.status === "in_progress")) {
       return { result: { output: "Blocked by Harness: shell access requires an active execution work unit.", exitCode: 1, cancelled: false, truncated: false } };
@@ -120,7 +131,10 @@ export default function workflowGuardian(pi: ExtensionAPI) {
   });
 
   pi.on("tool_call", (event, ctx) => {
-    if (event.toolName.startsWith("harness_")) return;
+    if (event.toolName.startsWith("harness_")) {
+      if (process.env.PI_SUB_AGENT_DEPTH) return { block: true, reason: "Only the parent lead may interact with Harness guardian transitions." };
+      return;
+    }
     const workflow = selectedWorkflowId ? readLiveV2Workflow(ctx.cwd, selectedWorkflowId) : undefined;
     if (event.toolName === "write" && isArtifactPath(ctx.cwd, event.input.path)) {
       return { block: true, reason: "Workflow artifacts are writable only through Harness guardian transitions." };
@@ -133,7 +147,7 @@ export default function workflowGuardian(pi: ExtensionAPI) {
       if (event.toolName === "subagent" && workflow && allowedRoles(workflow.state.phase).size > 0) {
         const task = typeof event.input.task === "string" ? event.input.task : "";
         const reservation = workflow.state.delegations.find((entry: any) => entry.status === "reserved" && entry.task === task);
-        if (reservation && event.input.agent === reservation.role) return;
+        if (reservation && event.input.agent === reservation.role && isCheckpointed(ctx.cwd, workflow.statePath)) return;
       }
       if (MUTATING_TOOLS.has(event.toolName)) return { block: true, reason: "Blocked by Harness: complete the required workflow phase first." };
       return { block: true, reason: "Blocked by Harness: only read-only tools are available before execution." };
@@ -145,7 +159,7 @@ export default function workflowGuardian(pi: ExtensionAPI) {
     if (event.toolName === "subagent") {
       const task = typeof event.input.task === "string" ? event.input.task : "";
       const reservation = workflow.state.delegations.find((entry: any) => entry.status === "reserved" && task === entry.task);
-      if (!reservation || event.input.agent !== reservation.role) return { block: true, reason: "Create and checkpoint a matching structured Harness delegation reservation before calling subagent." };
+      if (!reservation || event.input.agent !== reservation.role || !isCheckpointed(ctx.cwd, workflow.statePath)) return { block: true, reason: "Create and checkpoint a matching structured Harness delegation reservation before calling subagent." };
     }
   });
 
@@ -309,6 +323,7 @@ export default function workflowGuardian(pi: ExtensionAPI) {
       }
       const nextState = structuredClone(workflow.state);
       nextState.manifestVersion = manifest.version;
+      nextState.evidence.planProposed = manifest.version;
       nextState.workUnits = Object.fromEntries(manifest.workUnits.map((unit: any) => [unit.id, { status: "pending" }]));
       nextState.revision += 1;
       nextState.updatedAt = now();
@@ -341,6 +356,34 @@ export default function workflowGuardian(pi: ExtensionAPI) {
   });
 
   pi.registerTool({
+    name: "harness_record_delegation_result",
+    label: "Record Delegation Result",
+    description: "Parent lead records its review of a child result before it may support a workflow transition.",
+    parameters: Type.Object({ workflowId: Type.String(), delegationId: Type.String(), expectedRevision: Type.Integer(), evidence: Type.String(), accepted: Type.Boolean() }),
+    async execute(_id, params, _signal, _update, ctx) {
+      const workflow = stateFor(ctx.cwd, params.workflowId);
+      const reservation = workflow.state.delegations.find((entry: any) => entry.id === params.delegationId && entry.status === "reported");
+      if (!reservation) throw new Error("No reported delegation is available for parent review.");
+      writeState(workflow, params.expectedRevision, (state) => { const entry = state.delegations.find((candidate: any) => candidate.id === params.delegationId); entry.status = params.accepted ? "accepted" : "rejected"; entry.parentEvidence = params.evidence; });
+      selectedWorkflowId = params.workflowId; refresh(ctx);
+      return { content: [{ type: "text", text: "Parent delegation review recorded." }], details: {} };
+    },
+  });
+
+  pi.registerTool({
+    name: "harness_reopen_workflow",
+    label: "Reopen Workflow",
+    description: "Parent lead records a material risk and reopens the current workflow for refinement.",
+    parameters: Type.Object({ workflowId: Type.String(), expectedRevision: Type.Integer(), reason: Type.String() }),
+    async execute(_id, params, _signal, _update, ctx) {
+      const workflow = stateFor(ctx.cwd, params.workflowId);
+      writeState(workflow, params.expectedRevision, (state) => { state.phase = "refinement"; state.evidence.reopened = { reason: params.reason, at: now() }; state.evidence.sharedUnderstanding = false; state.evidence.approval = false; });
+      selectedWorkflowId = params.workflowId; refresh(ctx);
+      return { content: [{ type: "text", text: "Workflow reopened for requirements refinement; propose a new manifest version before execution." }], details: {} };
+    },
+  });
+
+  pi.registerTool({
     name: "harness_request_approval",
     label: "Request Workflow Approval",
     description: "Request interactive approval for a structurally valid planning workflow.",
@@ -348,12 +391,10 @@ export default function workflowGuardian(pi: ExtensionAPI) {
     async execute(_id, params, _signal, _update, ctx) {
       if (!ctx.hasUI) throw new Error("Approval requires an interactive UI.");
       const workflow = stateFor(ctx.cwd, params.workflowId);
-      if (workflow.state.phase !== "planning" || !canEnterPlanning(workflow.state)) throw new Error("Planning is not ready for approval.");
-      writeState(workflow, params.expectedRevision, (state) => { state.phase = "awaiting_approval"; });
-      const updated = stateFor(ctx.cwd, params.workflowId);
-      const approved = await ctx.ui.confirm("Approve workflow", `Approve ${params.workflowId} manifest v${updated.manifest.version}?`);
-      if (!approved) throw new Error("The user did not approve this manifest version.");
-      writeState(updated, updated.state.revision, (state) => { state.evidence.approval = true; });
+      if (workflow.state.phase !== "planning" || !canEnterPlanning(workflow.state) || workflow.state.evidence.planProposed !== workflow.manifest.version) throw new Error("A validated successor plan is required before approval.");
+      const approved = await ctx.ui.confirm("Approve workflow", `Approve ${params.workflowId} manifest v${workflow.manifest.version}?`);
+      if (!approved) return { content: [{ type: "text", text: "Approval declined; workflow remains in planning." }], details: {} };
+      writeState(workflow, params.expectedRevision, (state) => { state.phase = "awaiting_approval"; state.evidence.approval = true; });
       selectedWorkflowId = params.workflowId;
       refresh(ctx);
       return { content: [{ type: "text", text: "Approval recorded. Commit this approval checkpoint before beginning execution." }], details: {} };
@@ -380,16 +421,19 @@ export default function workflowGuardian(pi: ExtensionAPI) {
   pi.registerTool({
     name: "harness_record_verification",
     label: "Record Workflow Verification",
-    description: "Record a passing verification receipt only after all work units and independent verification are complete.",
-    parameters: Type.Object({ workflowId: Type.String(), expectedRevision: Type.Integer(), evidence: Type.String(), commands: Type.String() }),
+    description: "Run the maintained test command and record a passing receipt only from its actual result.",
+    parameters: Type.Object({ workflowId: Type.String(), expectedRevision: Type.Integer() }),
     async execute(_id, params, _signal, _update, ctx) {
       const workflow = stateFor(ctx.cwd, params.workflowId);
       if (workflow.state.phase !== "verification" || !Object.values(workflow.state.workUnits).every((unit: any) => unit.status === "completed")) throw new Error("All work units must be completed before workflow verification.");
       if (!workflow.state.delegations.some((entry: any) => entry.status === "reported" && ["verifier", "reviewer"].includes(entry.role) && !entry.isError)) throw new Error("Independent verification evidence is required.");
       if (workflow.state.revision !== params.expectedRevision) throw new Error("Workflow revision changed; reload before recording verification.");
+      let testResult;
+      try { testResult = execFileSync("npm", ["test"], { cwd: ctx.cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }); } catch (error) { throw new Error(`npm test failed: ${error instanceof Error ? error.message : String(error)}`); }
       const revision = execFileSync("git", ["rev-parse", "HEAD"], { cwd: ctx.cwd, encoding: "utf8" }).trim();
-      const criteria = workflow.manifest.acceptanceCriteria.map((criterion: any) => ({ id: criterion.id, result: "passed", evidence: params.evidence }));
-      const receipt = { schemaVersion: 1, id: `receipt-${Date.now()}`, workflowId: params.workflowId, manifestVersion: workflow.manifest.version, result: "passed", projectRevision: revision, verifiedBy: "harness-guardian", verifiedAt: now(), acceptanceCriteria: criteria, commands: [{ command: params.commands, exitCode: 0, result: "reported by independent verifier" }], remainingRisks: ["Pi-internal enforcement does not prevent deliberate changes outside hrn."] };
+      const evidence = "npm test exited 0 under Harness guardian verification.";
+      const criteria = workflow.manifest.acceptanceCriteria.map((criterion: any) => ({ id: criterion.id, result: "passed", evidence }));
+      const receipt = { schemaVersion: 1, id: `receipt-${Date.now()}`, workflowId: params.workflowId, manifestVersion: workflow.manifest.version, result: "passed", projectRevision: revision, verifiedBy: "harness-guardian", verifiedAt: now(), acceptanceCriteria: criteria, commands: [{ command: "npm test", exitCode: 0, result: testResult.slice(-2000) }], remainingRisks: ["Pi-internal enforcement does not prevent deliberate changes outside hrn."] };
       const receiptPath = join(workflow.root, "receipts", `${receipt.id}.json`);
       mkdirSync(dirname(receiptPath), { recursive: true });
       writeFileSync(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, { mode: 0o600 });
@@ -408,7 +452,7 @@ export default function workflowGuardian(pi: ExtensionAPI) {
     async execute(_id, params, _signal, _update, ctx) {
       const workflow = stateFor(ctx.cwd, params.workflowId);
       if (workflow.state.phase !== "execution" || workflow.state.workUnits[params.workUnitId]?.status !== "in_progress") throw new Error("Only the active execution work unit may be completed.");
-      const independentEvidence = workflow.state.delegations.some((entry: any) => entry.status === "reported" && entry.workUnitId === params.workUnitId && ["verifier", "reviewer"].includes(entry.role) && !entry.isError);
+      const independentEvidence = workflow.state.delegations.some((entry: any) => entry.status === "accepted" && entry.workUnitId === params.workUnitId && ["verifier", "reviewer"].includes(entry.role) && !entry.isError);
       if (!independentEvidence) throw new Error("An independent verifier or reviewer delegation must report before completion.");
       writeState(workflow, params.expectedRevision, (state) => {
         state.workUnits[params.workUnitId] = { status: "completed", evidence: params.evidence, completedAt: now() };

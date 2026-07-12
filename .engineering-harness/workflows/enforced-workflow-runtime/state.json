@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
   "workflowId": "enforced-workflow-runtime",
-  "manifestVersion": 2,
-  "revision": 6,
-  "status": "verification_pending",
+  "manifestVersion": 3,
+  "revision": 9,
+  "status": "in_progress",
   "approval": {
     "status": "approved"
   },
-  "updatedAt": "2026-07-12T12:03:44Z",
+  "updatedAt": "2026-07-12T12:32:12Z",
   "workUnits": {
     "protocol-model": {
       "status": "completed"
@@ -28,6 +28,9 @@
       "status": "in_progress"
     },
     "release-contract": {
+      "status": "completed"
+    },
+    "guardian-reliability": {
       "status": "completed"
     }
   }
