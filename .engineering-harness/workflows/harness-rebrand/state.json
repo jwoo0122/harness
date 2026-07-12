@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "workflowId": "harness-rebrand",
   "manifestVersion": 2,
-  "revision": 5,
-  "status": "in_progress",
+  "revision": 6,
+  "status": "completed",
   "approval": {
     "status": "approved"
   },
-  "updatedAt": "2026-07-12T11:35:00Z",
+  "updatedAt": "2026-07-12T11:45:00Z",
   "workUnits": {
-    "merge-main": { "status": "in_progress" },
-    "verify-resolution": { "status": "pending" }
+    "merge-main": { "status": "completed" },
+    "verify-resolution": { "status": "completed" }
   }
 }
