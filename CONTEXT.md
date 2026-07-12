@@ -1,6 +1,6 @@
-# Engineering Harness Workflow Protocol
+# Harness Workflow Protocol
 
-This context defines the shared vocabulary for the durable workflow records that Engineering Harness agents maintain in a project.
+This context defines the shared vocabulary for the durable workflow records that Harness agents maintain in a project.
 
 ## Language
 

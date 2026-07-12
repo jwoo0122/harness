@@ -1,8 +1,8 @@
-# Engineering Harness
+# Harness
 
 A standalone engineering-agent CLI for requirements refinement, ADR-centered design, bounded delegation, and evidence-based delivery.
 
-`engineering-harness` is an external harness, like Gajae-Code: it runs beside the repository you choose instead of installing itself as a Pi package or modifying another agent's runtime. The npm package installs its pinned Pi runtime and `pi-sub-agent` dependency automatically, so users do **not** install `pi` or `pi-sub-agent` separately.
+Harness is an external harness, like Gajae-Code: it runs beside the repository you choose instead of installing itself as a Pi package or modifying another agent's runtime. The npm package installs its pinned Pi runtime and `pi-sub-agent` dependency automatically, so users do **not** install `pi` or `pi-sub-agent` separately.
 
 ## Install
 
@@ -15,26 +15,26 @@ The CLI validates the active Node.js version before it loads the runtime. An uns
 
 ```sh
 npm install -g --ignore-scripts @jwoo0122/engineering-harness-skills
-engineering-harness
+hrn
 ```
 
 Use an API-key environment variable supported by Pi, or authenticate interactively:
 
 ```sh
 export ANTHROPIC_API_KEY=sk-ant-...
-engineering-harness
+hrn
 
-# Or start the harness, then run:
+# Or start Harness, then run:
 /login
 ```
 
 The underlying Pi command-line flags remain available. For example:
 
 ```sh
-engineering-harness "Inspect this repository and define acceptance criteria."
-engineering-harness -p "Summarize the current architecture."
-engineering-harness --model anthropic/claude-sonnet-4-5
-engineering-harness --pi-help
+hrn "Inspect this repository and define acceptance criteria."
+hrn -p "Summarize the current architecture."
+hrn --model anthropic/claude-sonnet-4-5
+hrn --pi-help
 ```
 
 ## What the CLI owns
@@ -50,7 +50,7 @@ Harness state is isolated from Pi's normal state:
 | Bundled skills and global Harness guidance | Loaded from the installed package |
 | Shared workflow manifests, run state, and verification receipts | `.engineering-harness/workflows/` in the current Git worktree |
 
-Set `ENGINEERING_HARNESS_AGENT_DIR` to use a different state directory. The launcher deliberately ignores an inherited `PI_CODING_AGENT_DIR`, so a globally installed Pi cannot accidentally supply credentials, extensions, sessions, or settings to the Harness. Existing Pi credentials are not copied; use `/login` in `engineering-harness` or provider API-key environment variables.
+Set `ENGINEERING_HARNESS_AGENT_DIR` to use a different state directory. The launcher deliberately ignores an inherited `PI_CODING_AGENT_DIR`, so a globally installed Pi cannot accidentally supply credentials, extensions, sessions, or settings to Harness. Existing Pi credentials are not copied; use `/login` in `hrn` or provider API-key environment variables. Harness sets and enforces `quietStartup: true` in this isolated state, so the Pi startup header and its Context, Skills, and Extensions lists stay hidden even when trusted project settings set it to `false`; pass `--verbose` only when diagnosing the bundled runtime.
 
 On normal launch, the Harness installs missing bundled role definitions into its own state directory and preserves customized role files. There is no separate Harness setup command.
 
@@ -115,7 +115,7 @@ Update the CLI and its bundled runtime together:
 npm install -g --ignore-scripts @jwoo0122/engineering-harness-skills
 ```
 
-Do not run `pi update` for this installation.
+Run `hrn` after updating. Do not run `pi update` for this installation.
 
 The legacy distribution was installed as a Pi package with `pi install npm:engineering-harness-skills`. Migrate by removing that entry, then installing the standalone CLI:
 
@@ -156,10 +156,10 @@ test -n "$TARBALL"
 
 npm install --global --prefix "$TEST_ROOT/prefix" --ignore-scripts --no-audit --no-fund "$TARBALL"
 HOME="$TEST_ROOT/home" ENGINEERING_HARNESS_AGENT_DIR="$TEST_ROOT/agent" \
-  "$TEST_ROOT/prefix/bin/engineering-harness" --pi-help
+  "$TEST_ROOT/prefix/bin/hrn" --pi-help
 ```
 
-The final command proves the packed global CLI can locate its bundled runtime without contacting a model provider. To run the locally packaged Harness interactively, replace `--pi-help` with your prompt or no argument and authenticate with `/login` or a supported API-key environment variable. Run the commands in a shell with `trap` support; on Windows, use an equivalent temporary directory, `npm pack`, `npm install --global --prefix`, and the generated `prefix/bin/engineering-harness` command.
+The final command proves the packed global CLI can locate its bundled runtime without contacting a model provider. To run the locally packaged Harness interactively, replace `--pi-help` with your prompt or no argument and authenticate with `/login` or a supported API-key environment variable. Run the commands in a shell with `trap` support; on Windows, use an equivalent temporary directory, `npm pack`, `npm install --global --prefix`, and the generated `hrn` command.
 
 ## Verify the project
 
@@ -177,7 +177,7 @@ npm test
 ├── AGENTS.md                   # contributor guidance
 ├── CONTRIBUTING.md              # Conventional Commit and release policy
 ├── resources/AGENTS.md         # runtime guidance packaged for Harness agents
-├── bin/engineering-harness.js  # npm CLI entry point
+├── bin/hrn.js                  # npm CLI entry point
 ├── lib/launcher.js             # Node guard, state bootstrap, bundled Pi launcher
 ├── .agents/skills/             # bundled workflow skills
 ├── .pi/agents/                 # bundled Harness subagent roles

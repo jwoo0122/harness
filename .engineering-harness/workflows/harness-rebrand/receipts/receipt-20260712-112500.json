@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "id": "receipt-20260712-112500",
+  "workflowId": "harness-rebrand",
+  "manifestVersion": 1,
+  "result": "passed",
+  "projectRevision": "80f33ecfebedc4db3f9b7a432707a555f7ae5a26",
+  "verifiedBy": "independent reviewer and lead engineer",
+  "verifiedAt": "2026-07-12T11:25:00Z",
+  "acceptanceCriteria": [
+    {
+      "id": "hrn-cli",
+      "result": "passed",
+      "evidence": "tests/test-standalone-cli.sh packed and installed the npm artifact, verified the hrn executable exists, the legacy executable does not, and help identifies Harness."
+    },
+    {
+      "id": "quiet-startup",
+      "result": "passed",
+      "evidence": "tests/test-standalone-cli.sh verified persisted quietStartup: true, preserved an existing theme setting, and proved a trusted project quietStartup:false still resolves to true through the pinned Pi SettingsManager."
+    },
+    {
+      "id": "visible-progress",
+      "result": "passed",
+      "evidence": "tests/test-standalone-cli.sh verified the mock provider received the bundled instruction requiring a visible tool-purpose update before each tool call or independent batch."
+    },
+    {
+      "id": "regression-suite",
+      "result": "passed",
+      "evidence": "npm ci --ignore-scripts and npm test passed; npm test ran installer, packed standalone CLI, workflow-context, child-agent, and release/Homebrew checks."
+    },
+    {
+      "id": "pull-request",
+      "result": "passed",
+      "evidence": "Opened https://github.com/jwoo0122/harness/pull/9 with Conventional Commit title feat(cli)!: rename Harness command to hrn."
+    }
+  ],
+  "commands": [
+    { "command": "npm ci --ignore-scripts", "exitCode": 0, "result": "passed" },
+    { "command": "./tests/test-standalone-cli.sh", "exitCode": 0, "result": "passed" },
+    { "command": "npm test", "exitCode": 0, "result": "passed" },
+    { "command": "node --check lib/launcher.js && npm pack --dry-run --json --ignore-scripts", "exitCode": 0, "result": "passed" }
+  ],
+  "remainingRisks": [
+    "Quiet-startup enforcement relies on the pinned Pi 0.80.6 SettingsManager internal module and must be revalidated when Pi is upgraded."
+  ]
+}

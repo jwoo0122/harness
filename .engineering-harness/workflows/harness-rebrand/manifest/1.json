@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "workflowId": "harness-rebrand",
+  "version": 1,
+  "title": "Rename the Harness CLI and minimize runtime UI",
+  "goal": "Ship the existing npm distribution as Harness, invoked with hrn, with Pi startup resource UI hidden and explicit agent progress communication.",
+  "acceptanceCriteria": [
+    {
+      "id": "hrn-cli",
+      "description": "A packed npm installation exposes hrn as the supported executable; its help and diagnostics identify Harness without changing the existing npm package, state-path, or Homebrew package contracts."
+    },
+    {
+      "id": "quiet-startup",
+      "description": "A normal Harness runtime launch writes quietStartup: true in its isolated agent settings before Pi starts, so Pi's startup header (including Context, Skills, and Extensions) is hidden unless the user explicitly requests Pi --verbose."
+    },
+    {
+      "id": "visible-progress",
+      "description": "The bundled runtime guidance requires concise user-visible progress updates before tool calls and after material findings, including the intended tool and outcome-level purpose without exposing private chain-of-thought."
+    },
+    {
+      "id": "regression-suite",
+      "description": "Focused packed-CLI coverage and the repository-required npm test suite pass without including the pre-existing untracked pnpm-lock.yaml in the change."
+    },
+    {
+      "id": "pull-request",
+      "description": "The verified change is committed on a branch and submitted as a Conventional Commit-titled pull request."
+    }
+  ],
+  "workUnits": [
+    {
+      "id": "implement-cli",
+      "title": "Implement CLI branding and quiet startup",
+      "dependsOn": [],
+      "blockers": [],
+      "acceptanceCriteria": ["hrn-cli", "quiet-startup"]
+    },
+    {
+      "id": "update-guidance",
+      "title": "Require visible agent progress communication",
+      "dependsOn": [],
+      "blockers": [],
+      "acceptanceCriteria": ["visible-progress"]
+    },
+    {
+      "id": "verify-and-submit",
+      "title": "Verify, review, commit, and open pull request",
+      "dependsOn": ["implement-cli", "update-guidance"],
+      "blockers": [],
+      "acceptanceCriteria": ["regression-suite", "pull-request"]
+    }
+  ],
+  "relationships": []
+}

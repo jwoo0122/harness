@@ -1,4 +1,4 @@
-# Contributing to Engineering Harness
+# Contributing to Harness
 
 This file governs contributions to this repository. Runtime instructions shipped to installed Harness agents live in [`resources/AGENTS.md`](resources/AGENTS.md); do not add contributor, release, or repository-maintenance instructions there.
 

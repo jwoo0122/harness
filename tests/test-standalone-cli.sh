@@ -36,7 +36,7 @@ printf '%s\n' '---' 'name: engineering-lead' 'description: poison global skill m
 (
   cd "$ROOT"
   PACK_JSON=$(npm pack --dry-run --json --ignore-scripts)
-  printf '%s\n' "$PACK_JSON" | grep -F 'bin/engineering-harness.js' >/dev/null
+  printf '%s\n' "$PACK_JSON" | grep -F 'bin/hrn.js' >/dev/null
   printf '%s\n' "$PACK_JSON" | grep -F 'lib/launcher.js' >/dev/null
   printf '%s\n' "$PACK_JSON" | grep -F 'lib/workflow-context.js' >/dev/null
   printf '%s\n' "$PACK_JSON" | grep -F '.agents/skills/engineering-lead/SKILL.md' >/dev/null
@@ -49,7 +49,8 @@ TARBALL=$(find "$TEST_ROOT" -maxdepth 1 -name 'jwoo0122-engineering-harness-skil
 [ -n "$TARBALL" ]
 npm install --global --prefix "$INSTALL_ROOT" --ignore-scripts --no-audit --no-fund "$TARBALL" >/dev/null
 
-BIN="$INSTALL_ROOT/bin/engineering-harness"
+BIN="$INSTALL_ROOT/bin/hrn"
+[ ! -e "$INSTALL_ROOT/bin/engineering-harness" ]
 PACKAGE_INSTALL="$INSTALL_ROOT/lib/node_modules/@jwoo0122/engineering-harness-skills"
 [ -x "$BIN" ]
 [ -d "$PACKAGE_INSTALL" ]
@@ -63,7 +64,7 @@ PNPM_HOME="$TEST_ROOT/pnpm-home"
 mkdir -p "$PNPM_PROJECT" "$PNPM_HOME"
 printf '%s\n' '{"name":"engineering-harness-pnpm-test","private":true}' > "$PNPM_PROJECT/package.json"
 "$PNPM" --dir "$PNPM_PROJECT" add --ignore-scripts --config.node-linker=isolated --store-dir "$PNPM_STORE" "$TARBALL" >/dev/null
-PNPM_BIN="$PNPM_PROJECT/node_modules/.bin/engineering-harness"
+PNPM_BIN="$PNPM_PROJECT/node_modules/.bin/hrn"
 PNPM_PACKAGE="$PNPM_PROJECT/node_modules/@jwoo0122/engineering-harness-skills"
 [ -x "$PNPM_BIN" ]
 [ -d "$PNPM_PACKAGE" ]
@@ -81,7 +82,20 @@ grep -F 'sub-agent-settings' "$TEST_ROOT/pnpm-rpc-output.jsonl" >/dev/null
 VERSION=$(env -i HOME="$HOME_ROOT" PATH="$NODE_ONLY_BIN" "$BIN" --version)
 EXPECTED_VERSION=$(PACKAGE_JSON="$(cat "$ROOT/package.json")" node --input-type=module -e 'import process from "node:process"; process.stdout.write(JSON.parse(process.env.PACKAGE_JSON).version)')
 [ "$VERSION" = "$EXPECTED_VERSION" ]
-env -i HOME="$HOME_ROOT" PATH="$NODE_ONLY_BIN" "$BIN" --help | grep -F 'No separate pi installation is required.' >/dev/null
+PACKAGE_LOCK="$ROOT/package-lock.json" node --input-type=module <<'EOF'
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+const lock = JSON.parse(readFileSync(process.env.PACKAGE_LOCK, "utf8"));
+assert.deepEqual(lock.packages[""].bin, { hrn: "bin/hrn.js" });
+EOF
+HELP=$(env -i HOME="$HOME_ROOT" PATH="$NODE_ONLY_BIN" "$BIN" --help)
+printf '%s\n' "$HELP" | grep -Fx 'Harness' >/dev/null
+printf '%s\n' "$HELP" | grep -F 'hrn [Pi options] [message...]' >/dev/null
+printf '%s\n' "$HELP" | grep -F 'No separate pi installation is required.' >/dev/null
+if printf '%s\n' "$HELP" | grep -F 'engineering-harness' >/dev/null; then
+  printf '%s\n' 'Harness help must not expose the legacy CLI name' >&2
+  exit 1
+fi
 for command in setup status resume verify; do
   if env -i HOME="$HOME_ROOT" PATH="$NODE_ONLY_BIN" "$BIN" --help | grep -F "$command" >/dev/null; then
     printf '%s\n' "Harness help must not advertise a $command command" >&2
@@ -89,6 +103,9 @@ for command in setup status resume verify; do
   fi
 done
 [ ! -e "$HOME_ROOT/.engineering-harness/agent/agents/implementer.md" ]
+mkdir -p "$HOME_ROOT/.engineering-harness/agent" "$PROJECT_ROOT/.pi"
+printf '%s\n' '{"theme":"light","quietStartup":false}' > "$HOME_ROOT/.engineering-harness/agent/settings.json"
+printf '%s\n' '{"quietStartup":false}' > "$PROJECT_ROOT/.pi/settings.json"
 
 AMBIENT_PI_HOME="$TEST_ROOT/ambient-pi"
 AMBIENT_SESSION_DIR="$TEST_ROOT/ambient-sessions"
@@ -110,6 +127,28 @@ grep -F 'sub-agent-settings' "$TEST_ROOT/rpc-output.jsonl" >/dev/null
 for role in requirements-analyst explorer architect implementer verifier reviewer; do
   [ -f "$HOME_ROOT/.engineering-harness/agent/agents/$role.md" ]
 done
+SETTINGS_PATH="$HOME_ROOT/.engineering-harness/agent/settings.json"
+SETTINGS_PATH="$SETTINGS_PATH" node --input-type=module <<'EOF'
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+const settings = JSON.parse(readFileSync(process.env.SETTINGS_PATH, "utf8"));
+assert.equal(settings.quietStartup, true);
+assert.equal(settings.theme, "light");
+EOF
+ROOT="$ROOT" PROJECT_ROOT="$PROJECT_ROOT" AGENT_DIR="$HOME_ROOT/.engineering-harness/agent" node --input-type=module <<'EOF'
+import assert from "node:assert/strict";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+const root = process.env.ROOT;
+const agentDir = process.env.AGENT_DIR;
+const piCli = resolve(root, "node_modules/@earendil-works/pi-coding-agent/dist/cli.js");
+const { configureQuietStartup } = await import(pathToFileURL(resolve(root, "lib/launcher.js")).href);
+await configureQuietStartup(agentDir, piCli);
+const { SettingsManager } = await import(pathToFileURL(resolve(root, "node_modules/@earendil-works/pi-coding-agent/dist/core/settings-manager.js")).href);
+const settings = SettingsManager.create(process.env.PROJECT_ROOT, agentDir);
+assert.equal(settings.getProjectSettings().quietStartup, false);
+assert.equal(settings.getQuietStartup(), true);
+EOF
 [ ! -e "$HOME_ROOT/.pi/agent/agents/implementer.md" ]
 if grep -F -e 'global Pi state must not load' -e 'ambient Pi state must not load' -e 'poison global skill must not load' "$TEST_ROOT/rpc-output.jsonl" >/dev/null; then
   printf '%s\n' 'standalone CLI loaded ambient Pi state' >&2
@@ -316,6 +355,7 @@ EOF
 grep -Fx 'parent completed' "$TEST_ROOT/subagent-output.txt" >/dev/null
 [ "$(wc -l < "$MOCK_LOG" | tr -d ' ')" -eq 3 ]
 grep -F 'workflow-alpha' "$MOCK_REQUEST_LOG" >/dev/null
+grep -F 'Before each tool call or independent parallel tool batch' "$MOCK_REQUEST_LOG" >/dev/null
 for workflow in workflow-invalid workflow-cycle workflow-bad-revision workflow-incomplete workflow-unrecipted workflow-invalid-time workflow-linked workflow-local; do
   if grep -F "$workflow" "$MOCK_REQUEST_LOG" >/dev/null; then
     printf '%s\n' "excluded workflow artifact was injected: $workflow" >&2

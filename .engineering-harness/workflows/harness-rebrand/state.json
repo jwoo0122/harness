@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "workflowId": "harness-rebrand",
+  "manifestVersion": 2,
+  "revision": 6,
+  "status": "completed",
+  "approval": {
+    "status": "approved"
+  },
+  "updatedAt": "2026-07-12T11:45:00Z",
+  "workUnits": {
+    "merge-main": { "status": "completed" },
+    "verify-resolution": { "status": "completed" }
+  }
+}

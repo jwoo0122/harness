@@ -47,7 +47,7 @@ export function buildFormula({ version, tarballUrl, sha256 }) {
   end
 
   test do
-    assert_match version.to_s, shell_output("#{bin}/engineering-harness --version")
+    assert_match version.to_s, shell_output("#{bin}/hrn --version")
   end
 end
 `;

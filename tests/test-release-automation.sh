@@ -66,6 +66,7 @@ const oldFormula = buildFormula({
   tarballUrl: "https://registry.npmjs.org/engineering-harness-skills/-/engineering-harness-skills-1.2.2.tgz",
   sha256: "0".repeat(64),
 });
+assert.match(oldFormula, /#\{bin\}\/hrn --version/);
 const requests = [];
 const fetchImpl = async (url, options = {}) => {
   requests.push({ url: String(url), options });

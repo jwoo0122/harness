@@ -1,4 +1,4 @@
-# Contributing to Engineering Harness
+# Contributing to Harness
 
 ## Setup and verification
 
@@ -22,7 +22,7 @@ test -n "$TARBALL"
 
 npm install --global --prefix "$TEST_ROOT/prefix" --ignore-scripts --no-audit --no-fund "$TARBALL"
 HOME="$TEST_ROOT/home" ENGINEERING_HARNESS_AGENT_DIR="$TEST_ROOT/agent" \
-  "$TEST_ROOT/prefix/bin/engineering-harness" --pi-help
+  "$TEST_ROOT/prefix/bin/hrn" --pi-help
 ```
 
 `npm pack` creates the local package build and `--pi-help` starts the packed runtime without needing model credentials. Replace `--pi-help` with an interactive invocation after configuring `/login` or a provider API key. On Windows, use the equivalent temporary directory, `npm pack`, `npm install --global --prefix`, and generated binary command.

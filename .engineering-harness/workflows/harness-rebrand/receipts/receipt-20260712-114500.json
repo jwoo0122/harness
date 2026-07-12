@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "id": "receipt-20260712-114500",
+  "workflowId": "harness-rebrand",
+  "manifestVersion": 2,
+  "result": "passed",
+  "projectRevision": "c84e142c31db97ec8c66c555d27c26a15df8fbd4",
+  "verifiedBy": "lead engineer",
+  "verifiedAt": "2026-07-12T11:45:00Z",
+  "acceptanceCriteria": [
+    {
+      "id": "conflict-resolution",
+      "result": "passed",
+      "evidence": "Merged origin/main at 03a79e1 into the PR branch, resolved the sole package.json conflict by preserving main's 2.1.0 release metadata and Harness's hrn contract, and found no conflict markers."
+    },
+    {
+      "id": "regression-verification",
+      "result": "passed",
+      "evidence": "npm ci --ignore-scripts and npm test passed after the merge; the suite covers installer, packed standalone CLI, workflow context, child agent, and release/Homebrew behavior."
+    },
+    {
+      "id": "pr-mergeable",
+      "result": "passed",
+      "evidence": "GitHub PR #9 reports state OPEN, mergeStateStatus CLEAN, and mergeable MERGEABLE at c84e142c31db97ec8c66c555d27c26a15df8fbd4."
+    }
+  ],
+  "commands": [
+    {
+      "command": "git fetch origin main && git merge --no-edit origin/main",
+      "exitCode": 0,
+      "result": "passed after resolving package.json conflict"
+    },
+    {
+      "command": "npm ci --ignore-scripts",
+      "exitCode": 0,
+      "result": "passed"
+    },
+    {
+      "command": "npm test",
+      "exitCode": 0,
+      "result": "passed"
+    },
+    {
+      "command": "gh pr view 9 --repo jwoo0122/harness --json mergeStateStatus,mergeable",
+      "exitCode": 0,
+      "result": "passed: CLEAN and MERGEABLE"
+    }
+  ],
+  "remainingRisks": [
+    "The existing untracked pnpm-lock.yaml remains intentionally excluded from this PR."
+  ]
+}
