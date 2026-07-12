@@ -20,17 +20,6 @@ import {
 const MUTATING_TOOLS = new Set(["write", "edit", "bash", "subagent"]);
 const READ_ONLY_TOOLS = new Set(["read", "grep", "find", "ls"]);
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-const BUILTIN_GIT_COMMANDS = new Set([
-  "add", "am", "annotate", "apply", "archive", "bisect", "blame", "branch", "bundle", "cat-file", "check-attr", "check-ignore", "checkout", "cherry", "cherry-pick", "clean", "clone", "commit", "config", "count-objects", "describe", "diff", "difftool", "fast-export", "fetch", "for-each-ref", "format-patch", "fsck", "gc", "grep", "hash-object", "help", "init", "log", "ls-files", "ls-remote", "ls-tree", "merge", "merge-base", "mergetool", "mv", "name-rev", "notes", "pack-objects", "patch-id", "prune", "pull", "push", "range-diff", "read-tree", "rebase", "reflog", "remote", "repack", "replace", "rerere", "reset", "restore", "revert", "rev-list", "rev-parse", "rm", "show", "shortlog", "show-branch", "sparse-checkout", "stash", "status", "submodule", "switch", "symbolic-ref", "tag", "unpack-objects", "update-index", "update-ref", "verify-commit", "verify-pack", "verify-tag", "worktree", "write-tree",
-]);
-
-function gitCommandRejection(args: string[]) {
-  if (!BUILTIN_GIT_COMMANDS.has(args[0])) return "the first argument must be a supported built-in Git command";
-  if (args[0] === "config" && args.some((arg) => ["--global", "--system", "--file", "--blob"].includes(arg) || arg.startsWith("--file=") || arg.startsWith("--blob="))) {
-    return "Git config changes must remain in the current project";
-  }
-  return undefined;
-}
 
 function now() {
   return new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -192,11 +181,9 @@ export default function workflowGuardian(pi: ExtensionAPI) {
   pi.registerTool({
     name: "harness_git",
     label: "Run Git",
-    description: "Run a supported built-in Git command in the current project without making Git state a workflow prerequisite.",
+    description: "Run a Git command in the current project without making Git state a workflow prerequisite.",
     parameters: Type.Object({ args: Type.Array(Type.String(), { minItems: 1 }) }),
     async execute(_id, params, _signal, _update, ctx) {
-      const rejection = gitCommandRejection(params.args);
-      if (rejection) return { isError: true, content: [{ type: "text", text: `Git command rejected: ${rejection}.` }], details: {} };
       try {
         const output = execFileSync("git", params.args, { cwd: ctx.cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
         return { content: [{ type: "text", text: output || "Git command completed." }], details: {} };

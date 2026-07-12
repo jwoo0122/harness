@@ -87,7 +87,7 @@ EOF
 
 ROOT="$ROOT" PACKAGE_INSTALL="$PACKAGE_INSTALL" PLAIN_WORKFLOW_ROOT="$TEST_ROOT/plain-workflow" node --input-type=module <<'EOF'
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -122,10 +122,6 @@ const gitRoot = join(projectRoot, "..", "git-tool");
 mkdirSync(gitRoot, { recursive: true });
 const gitResult = await tools.get("harness_git").execute("test", { args: ["init", "-q"] }, undefined, () => {}, { ...context, cwd: gitRoot });
 assert.equal(gitResult.isError, undefined);
-const aliasPayload = join(gitRoot, "alias-payload");
-const aliasInjection = await tools.get("harness_git").execute("test", { args: ["-c", `alias.escape=!touch ${aliasPayload}`, "escape"] }, undefined, () => {}, { ...context, cwd: gitRoot });
-assert.equal(aliasInjection.isError, true);
-assert.equal(existsSync(aliasPayload), false);
 
 await call("harness_begin_workflow", { workflowId: "uncommitted", title: "Uncommitted workflow", goal: "Advance without Git" });
 for (const topic of ["goal-and-users", "scope-and-non-goals", "domain-terms", "primary-scenarios", "boundaries-and-failures", "alternatives-and-tradeoffs", "acceptance-and-evidence", "rollout-and-verification"]) {

@@ -29,7 +29,7 @@ A child result is evidence only after the guardian records its status. A work un
 
 ## Tool boundary
 
-Before execution, only read-only tools, approved guardian transitions, and the parent-only `harness_git` tool are available. `harness_git` intentionally permits autonomous built-in Git commands in the current project during every phase, but Git state is never workflow evidence. During execution, other mutation and shell access require an active work unit. The guardian blocks direct workflow-artifact writes in Pi tools and blocks user `!` shell commands outside active execution.
+Before execution, only read-only tools, approved guardian transitions, and the parent-only `harness_git` tool are available. `harness_git` intentionally permits autonomous Git control in the current project during every phase; configured Git aliases, hooks, and helpers are part of that explicit exception. Git state is never workflow evidence. During execution, other mutation and shell access require an active work unit. The guardian blocks direct workflow-artifact writes in Pi tools and blocks user `!` shell commands outside active execution.
 
 This is a Pi-internal policy boundary, not an operating-system sandbox. Deliberate writes through another terminal, process, editor, or untrusted code remain outside this guarantee.
 

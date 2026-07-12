@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "workflowId": "self-commit-guardian-transitions",
   "manifestVersion": 3,
-  "revision": 26,
+  "revision": 28,
   "phase": "execution",
   "evidence": {
     "refinement": {
@@ -98,8 +98,11 @@
       "role": "reviewer",
       "workUnitId": "implement-git-independent-guardian",
       "task": "[[harness-delegation:delegation-26]]\nRole: reviewer\nPurpose: Verify that the remediation retains Git-independent Guardian transitions and user-approved autonomous built-in Git control while rejecting Git alias-based shell execution and preserving non-Git evidence gates.\nInputs: Commit 1918103; modified extensions/workflow-guardian.ts, tests/test-standalone-cli.sh, resources/AGENTS.md, README.md, CONTEXT.md; prior security review findings.\nRead-only dependencies: Repository source, current workflow artifacts, prior reviewer reports, Git diff, and test output.\nProhibited scope: Do not edit files, create commits, alter workflow artifacts, or require Git commits as a workflow prerequisite.\nVerification: Inspect the Git command validation, the alias-injection regression, direct filesystem workflow discovery, and retained approval/review/verification checks. Report only evidence-backed findings.\nStop conditions: Report PARTIAL for any remaining alias/shell bypass, Git-derived transition condition, or weakened non-Git evidence gate; report BLOCKED only for missing prerequisites.\nReturn status, evidence, files changed, verification performed, assumptions, remaining risks, and unresolved issues.",
-      "status": "reserved",
-      "createdAt": "2026-07-12T17:20:48Z"
+      "status": "rejected",
+      "createdAt": "2026-07-12T17:20:48Z",
+      "reportedAt": "2026-07-12T17:26:17Z",
+      "isError": false,
+      "parentEvidence": "The reviewer correctly identified Git-mediated subprocess paths. The user explicitly confirmed that parent-agent autonomous Git control in trusted projects is an intentional exception to ordinary shell restrictions, so the built-in-only remediation is no longer aligned with the approved requirement. Restore unrestricted current-project Git invocation and document the exception clearly."
     }
   ],
   "workUnits": {
@@ -110,5 +113,5 @@
       "status": "pending"
     }
   },
-  "updatedAt": "2026-07-12T17:20:48Z"
+  "updatedAt": "2026-07-12T17:27:08Z"
 }
