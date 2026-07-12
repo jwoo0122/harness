@@ -15,6 +15,9 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const root = process.env.ROOT;
+const packageManifest = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"));
+assert.equal(packageManifest.name, "@jwoo0122/engineering-harness-skills");
+assert.equal(packageManifest.publishConfig.access, "public");
 const releaseConfig = JSON.parse(readFileSync(resolve(root, ".releaserc.json"), "utf8"));
 assert.deepEqual(releaseConfig.branches, ["main"]);
 assert.equal(releaseConfig.tagFormat, "v${version}");
@@ -66,14 +69,14 @@ const oldFormula = buildFormula({
 const requests = [];
 const fetchImpl = async (url, options = {}) => {
   requests.push({ url: String(url), options });
-  if (url === "https://registry.npmjs.org/engineering-harness-skills/1.2.3") {
+  if (url === "https://registry.npmjs.org/@jwoo0122%2Fengineering-harness-skills/1.2.3") {
     return Response.json({
       dist: {
-        tarball: "https://registry.npmjs.org/engineering-harness-skills/-/engineering-harness-skills-1.2.3.tgz",
+        tarball: "https://registry.npmjs.org/@jwoo0122/engineering-harness-skills/-/engineering-harness-skills-1.2.3.tgz",
       },
     });
   }
-  if (url === "https://registry.npmjs.org/engineering-harness-skills/-/engineering-harness-skills-1.2.3.tgz") {
+  if (url === "https://registry.npmjs.org/@jwoo0122/engineering-harness-skills/-/engineering-harness-skills-1.2.3.tgz") {
     return new Response(tarball);
   }
   if (url === "https://api.github.com/repos/jwoo0122/homebrew-tap/contents/Formula/engineering-harness.rb" && !options.method) {
@@ -82,7 +85,7 @@ const fetchImpl = async (url, options = {}) => {
   if (url === "https://api.github.com/repos/jwoo0122/homebrew-tap/contents/Formula/engineering-harness.rb" && options.method === "PUT") {
     const payload = JSON.parse(options.body);
     const formula = Buffer.from(payload.content, "base64").toString("utf8");
-    assert.match(formula, /engineering-harness-skills-1\.2\.3\.tgz/);
+    assert.ok(formula.includes('url "https://registry.npmjs.org/@jwoo0122/engineering-harness-skills/-/engineering-harness-skills-1.2.3.tgz"'));
     assert.match(formula, new RegExp(sha256));
     assert.equal(payload.branch, "main");
     assert.equal(payload.sha, "existing-formula-sha");
@@ -102,14 +105,14 @@ assert.equal(requests.length, 4);
 const createdRequests = [];
 const createFormulaFetch = async (url, options = {}) => {
   createdRequests.push({ url: String(url), options });
-  if (url === "https://registry.npmjs.org/engineering-harness-skills/1.2.4") {
+  if (url === "https://registry.npmjs.org/@jwoo0122%2Fengineering-harness-skills/1.2.4") {
     return Response.json({
       dist: {
-        tarball: "https://registry.npmjs.org/engineering-harness-skills/-/engineering-harness-skills-1.2.4.tgz",
+        tarball: "https://registry.npmjs.org/@jwoo0122/engineering-harness-skills/-/engineering-harness-skills-1.2.4.tgz",
       },
     });
   }
-  if (url === "https://registry.npmjs.org/engineering-harness-skills/-/engineering-harness-skills-1.2.4.tgz") {
+  if (url === "https://registry.npmjs.org/@jwoo0122/engineering-harness-skills/-/engineering-harness-skills-1.2.4.tgz") {
     return new Response(tarball);
   }
   if (url === "https://api.github.com/repos/jwoo0122/homebrew-tap/contents/Formula/engineering-harness.rb" && !options.method) {
@@ -134,6 +137,14 @@ assert.equal(createdRequests.length, 4);
 assert.throws(
   () => updateFormula('class Wrong < Formula\n  url "https://example.com/source.tgz"\n  sha256 "' + "0".repeat(64) + '"\nend\n', synchronized.release),
   /unexpected Homebrew formula class/,
+);
+assert.throws(
+  () => updateFormula(buildFormula({
+    version: "1.2.2",
+    tarballUrl: "https://registry.npmjs.org/engineering-harness-skills/-/other.tgz",
+    sha256: "0".repeat(64),
+  }), synchronized.release),
+  /non-Harness npm Homebrew source URL/,
 );
 EOF
 
@@ -160,6 +171,7 @@ PACK_JSON=$(cd "$ROOT" && npm pack --dry-run --json --ignore-scripts)
 PACK_JSON="$PACK_JSON" node --input-type=module <<'EOF'
 import assert from "node:assert/strict";
 const packed = JSON.parse(process.env.PACK_JSON);
+assert.equal(packed[0].name, "@jwoo0122/engineering-harness-skills");
 const files = packed[0].files.map((entry) => entry.path);
 assert(files.includes("resources/AGENTS.md"));
 assert(!files.includes("AGENTS.md"));

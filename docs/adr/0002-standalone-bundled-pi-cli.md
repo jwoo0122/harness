@@ -25,7 +25,7 @@ Publish `engineering-harness` from the existing npm package and make it the supp
 
 ## Consequences
 
-Users install and update only `engineering-harness-skills`; no global `pi` or separate `pi-sub-agent` installation is needed. They authenticate within Harness-owned state or provide supported API-key environment variables.
+Users install and update only `@jwoo0122/engineering-harness-skills`; no global `pi` or separate `pi-sub-agent` installation is needed. They authenticate within Harness-owned state or provide supported API-key environment variables.
 
 This is a breaking distribution change for Pi-package users. Users migrate by removing the legacy Pi package entry before installing the CLI. The legacy source layout remains available in Git history for rollback; it is not a supported new installation.
 

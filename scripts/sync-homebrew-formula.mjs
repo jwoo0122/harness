@@ -2,7 +2,15 @@ import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-const PACKAGE_NAME = "engineering-harness-skills";
+const PACKAGE_NAME = "@jwoo0122/engineering-harness-skills";
+const PACKAGE_TARBALL_NAME = "engineering-harness-skills";
+const LEGACY_PACKAGE_NAME = "engineering-harness-skills";
+const NPM_REGISTRY = "https://registry.npmjs.org";
+const PACKAGE_METADATA_PATH = PACKAGE_NAME.replace("/", "%2F");
+const PACKAGE_TARBALL_PREFIX = `${NPM_REGISTRY}/${PACKAGE_NAME}/-/`;
+const LEGACY_PACKAGE_TARBALL_PREFIX = `${NPM_REGISTRY}/${LEGACY_PACKAGE_NAME}/-/`;
+const ACCEPTED_TARBALL_PREFIXES = [PACKAGE_TARBALL_PREFIX, LEGACY_PACKAGE_TARBALL_PREFIX];
+const TARBALL_FILENAME_PATTERN = new RegExp(`^${PACKAGE_TARBALL_NAME}-\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?\\.tgz$`);
 const TAP_REPOSITORY = "jwoo0122/homebrew-tap";
 const FORMULA_PATH = "Formula/engineering-harness.rb";
 const FORMULA_CLASS = "EngineeringHarness";
@@ -16,6 +24,12 @@ function requireReleaseVersion(value) {
 
 function countMatches(source, expression) {
   return [...source.matchAll(expression)].length;
+}
+
+function isKnownHarnessTarballUrl(value) {
+  return ACCEPTED_TARBALL_PREFIXES.some((prefix) =>
+    value?.startsWith(prefix) && TARBALL_FILENAME_PATTERN.test(value.slice(prefix.length)),
+  );
 }
 
 export function buildFormula({ version, tarballUrl, sha256 }) {
@@ -49,9 +63,8 @@ export function updateFormula(existing, release) {
   }
 
   const currentUrl = /^\s*url\s+"([^"]+)"\s*$/m.exec(existing)?.[1];
-  const expectedPrefix = `https://registry.npmjs.org/${PACKAGE_NAME}/-/`;
-  if (!currentUrl?.startsWith(expectedPrefix)) {
-    throw new Error(`refusing to replace a non-${PACKAGE_NAME} Homebrew source URL`);
+  if (!isKnownHarnessTarballUrl(currentUrl)) {
+    throw new Error("refusing to replace a non-Harness npm Homebrew source URL");
   }
 
   return existing
@@ -91,10 +104,10 @@ export async function syncHomebrewFormula(version, {
   }
   if (typeof fetchImpl !== "function") throw new Error("fetch is required to synchronize the Homebrew formula");
 
-  const metadataUrl = `https://registry.npmjs.org/${PACKAGE_NAME}/${releaseVersion}`;
+  const metadataUrl = `${NPM_REGISTRY}/${PACKAGE_METADATA_PATH}/${releaseVersion}`;
   const metadata = await requireJson(await fetchImpl(metadataUrl), "npm registry lookup");
   const tarballUrl = metadata?.dist?.tarball;
-  const expectedTarballUrl = `https://registry.npmjs.org/${PACKAGE_NAME}/-/${PACKAGE_NAME}-${releaseVersion}.tgz`;
+  const expectedTarballUrl = `${PACKAGE_TARBALL_PREFIX}${PACKAGE_TARBALL_NAME}-${releaseVersion}.tgz`;
   if (tarballUrl !== expectedTarballUrl) {
     throw new Error(`npm registry returned an unexpected tarball URL for ${PACKAGE_NAME}@${releaseVersion}`);
   }

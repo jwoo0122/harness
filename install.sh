@@ -305,7 +305,7 @@ case $MODE in
     install_pi_agents
     check_install
     say "Codex: Use \$engineering-lead to lead and verify this work."
-    say "Standalone CLI: npm install -g --ignore-scripts engineering-harness-skills, then run engineering-harness."
+    say "Standalone CLI: npm install -g --ignore-scripts @jwoo0122/engineering-harness-skills, then run engineering-harness."
     say "The CLI bundles its Pi runtime and subagent extension; no separate pi installation is required."
     ;;
 esac
