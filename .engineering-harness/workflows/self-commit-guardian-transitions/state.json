@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "workflowId": "self-commit-guardian-transitions",
   "manifestVersion": 3,
-  "revision": 22,
+  "revision": 23,
   "phase": "execution",
   "evidence": {
     "refinement": {
@@ -81,6 +81,14 @@
       "reportedAt": "2026-07-12T17:13:56Z",
       "isError": false,
       "parentEvidence": "Reviewer found that the intentionally phase-independent harness_git capability conflicts with the shipped statement that every pre-execution mutation is blocked. The user explicitly chose autonomous Git control, so retain the capability but revise the runtime contract to state the deliberate exception and preserve all non-Git Guardian gates."
+    },
+    {
+      "id": "delegation-23",
+      "role": "reviewer",
+      "workUnitId": "implement-git-independent-guardian",
+      "task": "[[harness-delegation:delegation-23]]\nRole: reviewer\nPurpose: Re-review the implemented Git-independent Guardian behavior after the runtime contract was clarified to make parent-only autonomous harness_git access an explicit, user-approved exception to normal phase mutation controls.\nInputs: User decision requiring autonomous Git control at any time; ADR docs/adr/0001-decouple-guardian-transitions-from-git-state.md; modified Guardian, workflow context, resources, README, tests, and prior review finding.\nRead-only dependencies: Repository source, workflow artifacts, prior reviewer finding, Git diff, and test results.\nProhibited scope: Do not edit files, create commits, alter workflow artifacts, or reject the explicit autonomous-Git decision; identify only behavior inconsistent with that decision or weakened non-Git evidence gates.\nVerification: Inspect the final diff and map Git-independence, retained non-Git gates, explicit autonomous Git exception, and regression coverage to code and tests.\nStop conditions: Report PARTIAL if any Git-derived transition condition remains or any non-Git evidence gate is weakened; report BLOCKED only for a missing prerequisite.\nReturn status, evidence, files changed, verification performed, assumptions, remaining risks, and unresolved issues.",
+      "status": "reserved",
+      "createdAt": "2026-07-12T17:14:57Z"
     }
   ],
   "workUnits": {
@@ -91,5 +99,5 @@
       "status": "pending"
     }
   },
-  "updatedAt": "2026-07-12T17:14:36Z"
+  "updatedAt": "2026-07-12T17:14:57Z"
 }
