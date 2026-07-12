@@ -1,7 +1,7 @@
 {
   "name": "engineering-harness-skills",
-  "version": "0.1.0",
-  "description": "Requirements refinement, ADR-centered engineering workflows, and bounded Pi subagents",
+  "version": "0.0.0-development",
+  "description": "Standalone engineering harness CLI with bundled Pi runtime and bounded subagents",
   "type": "module",
   "license": "MIT",
   "author": "jwoo0122",
@@ -17,30 +17,44 @@
     "node": ">=22.19.0"
   },
   "keywords": [
-    "pi-package",
-    "pi-skill",
+    "engineering-harness",
+    "coding-agent",
     "engineering-workflow",
     "adr",
     "requirements-refinement"
   ],
+  "bin": {
+    "engineering-harness": "bin/engineering-harness.js"
+  },
   "files": [
     ".agents/skills",
+    ".pi/agents",
+    "bin",
+    "lib",
+    "resources",
     "README.md",
     "LICENSE",
     "THIRD-PARTY-NOTICES.md"
   ],
+  "scripts": {
+    "release": "semantic-release",
+    "test": "./tests/test-install.sh && ./tests/test-standalone-cli.sh && ./tests/test-release-automation.sh"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
+    "@earendil-works/pi-coding-agent": "0.80.6",
     "pi-sub-agent": "0.1.5"
   },
-  "bundledDependencies": [
-    "pi-sub-agent"
-  ],
-  "pi": {
-    "extensions": [
-      "./node_modules/pi-sub-agent/extensions/index.ts"
-    ],
-    "skills": [
-      "./.agents/skills"
-    ]
+  "devDependencies": {
+    "@semantic-release/changelog": "6.0.3",
+    "@semantic-release/commit-analyzer": "13.0.1",
+    "@semantic-release/exec": "7.1.0",
+    "@semantic-release/git": "10.0.1",
+    "@semantic-release/github": "12.0.9",
+    "@semantic-release/npm": "13.1.5",
+    "@semantic-release/release-notes-generator": "14.1.1",
+    "semantic-release": "25.0.6"
   }
 }

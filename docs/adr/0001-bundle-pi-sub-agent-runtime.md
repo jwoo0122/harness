@@ -1,5 +1,7 @@
 # Bundle the subagent runtime in the Pi package
 
+> Superseded by [ADR 0002](0002-standalone-bundled-pi-cli.md). This records the pre-standalone Pi-package distribution.
+
 The project distributes its Pi skills and the `subagent` extension as one npm Pi package, bundling the pinned `pi-sub-agent@0.1.5` dependency. This avoids a second user-managed installation while keeping the upstream runtime isolated and updateable as a bundled dependency rather than forking its implementation.
 
 ## Considered Options

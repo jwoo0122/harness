@@ -17,6 +17,11 @@ HARNESS_HOME="$TEST_HOME" "$ROOT/install.sh"
 
 grep -F '<!-- engineering-harness:start -->' "$TEST_HOME/.codex/AGENTS.md" >/dev/null
 grep -F '# Existing personal guidance' "$TEST_HOME/.codex/AGENTS.md" >/dev/null
+grep -F 'Act as the lead engineer responsible for delivering a working, verified result.' "$TEST_HOME/.codex/AGENTS.md" >/dev/null
+if grep -F 'All commits intended for `main`' "$TEST_HOME/.codex/AGENTS.md" >/dev/null; then
+  printf '%s\n' 'contributor instructions leaked into installed runtime guidance' >&2
+  exit 1
+fi
 [ "$(grep -c '<!-- engineering-harness:start -->' "$TEST_HOME/.codex/AGENTS.md")" -eq 1 ]
 [ -f "$TEST_HOME/.agents/skills/engineering-lead/SKILL.md" ]
 for skill in grill-with-docs grilling domain-modeling; do
@@ -115,7 +120,7 @@ rm -rf "$STRAY_HOME"
 FIXTURE_ROOT=$BOOTSTRAP_ROOT/archive/engineering-harness-fixture
 mkdir -p "$FIXTURE_ROOT"
 cp "$ROOT/install.sh" "$ROOT/AGENTS.md" "$FIXTURE_ROOT/"
-cp -R "$ROOT/.agents" "$ROOT/.codex" "$ROOT/.pi" "$FIXTURE_ROOT/"
+cp -R "$ROOT/.agents" "$ROOT/.codex" "$ROOT/.pi" "$ROOT/resources" "$FIXTURE_ROOT/"
 ARCHIVE=$BOOTSTRAP_ROOT/engineering-harness.tar.gz
 tar -czf "$ARCHIVE" -C "$BOOTSTRAP_ROOT/archive" engineering-harness-fixture
 
@@ -149,6 +154,9 @@ printf '%s\n' '# decoy skill from the current directory' > "$REMOTE_WORK/.agents
 [ -f "$REMOTE_HOME/.pi/agent/agents/implementer.md" ]
 cmp -s "$ROOT/.agents/skills/engineering-lead/SKILL.md" "$REMOTE_HOME/.agents/skills/engineering-lead/SKILL.md"
 cmp -s "$ROOT/.pi/agents/implementer.md" "$REMOTE_HOME/.pi/agent/agents/implementer.md"
+REMOTE_GUIDANCE="$BOOTSTRAP_ROOT/runtime-agents.md"
+awk '/<!-- engineering-harness:start -->/{inside=1;next} /<!-- engineering-harness:end -->/{inside=0} inside{print}' "$REMOTE_HOME/.codex/AGENTS.md" > "$REMOTE_GUIDANCE"
+cmp -s "$ROOT/resources/AGENTS.md" "$REMOTE_GUIDANCE"
 [ -z "$(find "$REMOTE_TMP" -mindepth 1 -maxdepth 1 -print -quit)" ]
 
 INVALID_ROOT=$BOOTSTRAP_ROOT/invalid-archive/incomplete

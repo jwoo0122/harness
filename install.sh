@@ -23,7 +23,7 @@ case ${1:-} in
 esac
 [ "$#" -le 1 ] || { usage >&2; exit 2; }
 
-SOURCE_AGENTS="$SCRIPT_DIR/AGENTS.md"
+SOURCE_AGENTS="$SCRIPT_DIR/resources/AGENTS.md"
 SOURCE_SKILLS="$SCRIPT_DIR/.agents/skills"
 SOURCE_SKILL="$SOURCE_SKILLS/engineering-lead"
 SOURCE_PERSONAS="$SCRIPT_DIR/.codex/agents"
@@ -85,7 +85,7 @@ bootstrap_sources() {
   [ "$#" -eq 1 ] && [ -d "$1" ] || fail "source archive must contain exactly one top-level directory"
   downloaded_root=$1
   [ -f "$downloaded_root/install.sh" ] || fail "source archive is missing install.sh"
-  [ -f "$downloaded_root/AGENTS.md" ] || fail "source archive is missing AGENTS.md"
+  [ -f "$downloaded_root/resources/AGENTS.md" ] || fail "source archive is missing runtime AGENTS.md"
   [ -f "$downloaded_root/.agents/skills/engineering-lead/SKILL.md" ] || fail "source archive is missing the engineering-lead skill"
   [ -d "$downloaded_root/.codex/agents" ] || fail "source archive is missing Codex personas"
   [ -d "$downloaded_root/.pi/agents" ] || fail "source archive is missing Pi agents"
@@ -305,7 +305,7 @@ case $MODE in
     install_pi_agents
     check_install
     say "Codex: Use \$engineering-lead to lead and verify this work."
-    say "Pi package: install npm:engineering-harness-skills to get the skills and bundled subagent runtime in one step."
-    say "Then ask Pi to use the engineering-lead or grill-with-docs skill and delegate only bounded work."
+    say "Standalone CLI: npm install -g --ignore-scripts engineering-harness-skills, then run engineering-harness."
+    say "The CLI bundles its Pi runtime and subagent extension; no separate pi installation is required."
     ;;
 esac

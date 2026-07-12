@@ -43,21 +43,18 @@ When a clarification is required, include the ambiguity, plausible alternatives,
 
 When the request or design has unresolved branches, use `/skill:grill-with-docs` before implementing. It asks one question at a time, distinguishes repository facts from user decisions, updates the project glossary as terms become precise, and records qualifying architectural decisions in `docs/adr/`. Do not implement until the user confirms the shared understanding.
 
-## Use with Pi
+## Use with Engineering Harness
 
-Pi discovers this portable Skill from `~/.agents/skills/` and loads global guidance from `~/.pi/agent/AGENTS.md`. The installer also installs these Pi role definitions under `~/.pi/agent/agents/`:
-
-- `requirements-analyst`, `explorer`, `architect`, and `reviewer` are read-only.
-- `implementer` owns one explicitly delegated change.
-- `verifier` is read-only except for diagnostic and test commands.
-
-Pi itself keeps subagents out of its core. Install this repository as a Pi package to get the engineering skills and the bundled `subagent` runtime in one step:
+The standalone `engineering-harness` CLI loads this portable Skill, its global guidance, Harness-owned roles, and the bundled `subagent` runtime in one command:
 
 ```sh
-pi install npm:engineering-harness-skills
+npm install -g engineering-harness-skills
+engineering-harness
 ```
 
-For local development, use `pi install ./ -l` from this repository. Then use the `subagent` tool with a single bounded task, for example `{ agent: "explorer", task: "..." }`. Keep its default user-agent scope unless project-local `.pi/agents` definitions have been reviewed and trusted. Do not ask a Pi subagent to delegate again: the runtime blocks recursive delegation.
+The CLI owns state under `~/.engineering-harness/agent` and does not require a separately installed `pi`. Its default `requirements-analyst`, `explorer`, `architect`, and `reviewer` roles are read-only; `implementer` owns one scoped change, and `verifier` is restricted to diagnostics and tests.
+
+Use the `subagent` tool with a single bounded task, for example `{ agent: "explorer", task: "..." }`. Keep its default user-agent scope unless project-local `.pi/agents` definitions have been reviewed and trusted. Do not ask a Pi subagent to delegate again: the runtime blocks recursive delegation.
 
 ## Handle failures
 
