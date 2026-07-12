@@ -7,7 +7,7 @@ CODEX_HOME=${CODEX_HOME:-"$HARNESS_HOME/.codex"}
 AGENTS_HOME=${AGENTS_HOME:-"$HARNESS_HOME/.agents"}
 PI_HOME=${PI_HOME:-"$HARNESS_HOME/.pi"}
 HARNESS_REF=${HARNESS_REF:-main}
-HARNESS_ARCHIVE_URL=${HARNESS_ARCHIVE_URL:-"https://codeload.github.com/jwoo0122/engineering-harness-skills/tar.gz/$HARNESS_REF"}
+HARNESS_ARCHIVE_URL=${HARNESS_ARCHIVE_URL:-"https://codeload.github.com/jwoo0122/harness/tar.gz/$HARNESS_REF"}
 MODE=install
 
 usage() {
@@ -305,7 +305,7 @@ case $MODE in
     install_pi_agents
     check_install
     say "Codex: Use \$engineering-lead to lead and verify this work."
-    say "Standalone CLI: npm install -g --ignore-scripts @jwoo0122/engineering-harness-skills, then run hrn."
+    say "Standalone CLI: npm install -g --ignore-scripts @jwoo0122/harness, then run hrn."
     say "The CLI bundles its Pi runtime and subagent extension; no separate pi installation is required."
     ;;
 esac

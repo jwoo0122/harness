@@ -1,17 +1,34 @@
 {
   "schemaVersion": 1,
   "workflowId": "enforced-workflow-runtime",
-  "manifestVersion": 1,
-  "revision": 2,
-  "status": "approved",
-  "approval": {"status": "approved"},
-  "updatedAt": "2026-07-12T11:47:20Z",
+  "manifestVersion": 2,
+  "revision": 6,
+  "status": "verification_pending",
+  "approval": {
+    "status": "approved"
+  },
+  "updatedAt": "2026-07-12T12:03:44Z",
   "workUnits": {
-    "protocol-model": {"status": "pending"},
-    "guardian-authorization": {"status": "pending"},
-    "launcher-boundary": {"status": "pending"},
-    "workflow-ui": {"status": "pending"},
-    "documentation": {"status": "pending"},
-    "verification": {"status": "pending"}
+    "protocol-model": {
+      "status": "completed"
+    },
+    "guardian-authorization": {
+      "status": "completed"
+    },
+    "launcher-boundary": {
+      "status": "completed"
+    },
+    "workflow-ui": {
+      "status": "completed"
+    },
+    "documentation": {
+      "status": "completed"
+    },
+    "verification": {
+      "status": "in_progress"
+    },
+    "release-contract": {
+      "status": "completed"
+    }
   }
 }

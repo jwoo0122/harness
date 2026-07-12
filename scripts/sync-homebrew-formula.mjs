@@ -2,15 +2,19 @@ import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-const PACKAGE_NAME = "@jwoo0122/engineering-harness-skills";
-const PACKAGE_TARBALL_NAME = "engineering-harness-skills";
-const LEGACY_PACKAGE_NAME = "engineering-harness-skills";
+const PACKAGE_NAME = "@jwoo0122/harness";
+const PACKAGE_TARBALL_NAME = "harness";
+const LEGACY_PACKAGE_NAME = "@jwoo0122/engineering-harness-skills";
+const LEGACY_PACKAGE_TARBALL_NAME = "engineering-harness-skills";
+const UNSCOPED_LEGACY_PACKAGE_NAME = "engineering-harness-skills";
 const NPM_REGISTRY = "https://registry.npmjs.org";
 const PACKAGE_METADATA_PATH = PACKAGE_NAME.replace("/", "%2F");
 const PACKAGE_TARBALL_PREFIX = `${NPM_REGISTRY}/${PACKAGE_NAME}/-/`;
 const LEGACY_PACKAGE_TARBALL_PREFIX = `${NPM_REGISTRY}/${LEGACY_PACKAGE_NAME}/-/`;
-const ACCEPTED_TARBALL_PREFIXES = [PACKAGE_TARBALL_PREFIX, LEGACY_PACKAGE_TARBALL_PREFIX];
-const TARBALL_FILENAME_PATTERN = new RegExp(`^${PACKAGE_TARBALL_NAME}-\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?\\.tgz$`);
+const UNSCOPED_LEGACY_PACKAGE_TARBALL_PREFIX = `${NPM_REGISTRY}/${UNSCOPED_LEGACY_PACKAGE_NAME}/-/`;
+const ACCEPTED_TARBALL_PREFIXES = [PACKAGE_TARBALL_PREFIX, LEGACY_PACKAGE_TARBALL_PREFIX, UNSCOPED_LEGACY_PACKAGE_TARBALL_PREFIX];
+const TARBALL_FILENAME_PATTERNS = [PACKAGE_TARBALL_NAME, LEGACY_PACKAGE_TARBALL_NAME]
+  .map((name) => new RegExp(`^${name}-\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?\\.tgz$`));
 const TAP_REPOSITORY = "jwoo0122/homebrew-tap";
 const FORMULA_PATH = "Formula/engineering-harness.rb";
 const FORMULA_CLASS = "EngineeringHarness";
@@ -28,14 +32,14 @@ function countMatches(source, expression) {
 
 function isKnownHarnessTarballUrl(value) {
   return ACCEPTED_TARBALL_PREFIXES.some((prefix) =>
-    value?.startsWith(prefix) && TARBALL_FILENAME_PATTERN.test(value.slice(prefix.length)),
+    value?.startsWith(prefix) && TARBALL_FILENAME_PATTERNS.some((pattern) => pattern.test(value.slice(prefix.length))),
   );
 }
 
 export function buildFormula({ version, tarballUrl, sha256 }) {
   return `class ${FORMULA_CLASS} < Formula
   desc "Standalone engineering workflow harness CLI"
-  homepage "https://github.com/jwoo0122/engineering-harness-skills"
+  homepage "https://github.com/jwoo0122/harness"
   url "${tarballUrl}"
   sha256 "${sha256}"
   license "MIT"

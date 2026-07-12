@@ -30,6 +30,7 @@
     ".agents/skills",
     ".pi/agents",
     "bin",
+    "extensions",
     "lib",
     "resources",
     "README.md",
