@@ -1,6 +1,6 @@
 {
   "name": "engineering-harness-skills",
-  "version": "0.0.0-development",
+  "version": "1.0.0",
   "description": "Standalone engineering harness CLI with bundled Pi runtime and bounded subagents",
   "type": "module",
   "license": "MIT",
