@@ -48,15 +48,27 @@ Harness state is isolated from Pi's normal state:
 | Authentication, settings, trust decisions, and sessions | `~/.engineering-harness/agent/` |
 | Harness-owned subagent roles | `~/.engineering-harness/agent/agents/` |
 | Bundled skills and global Harness guidance | Loaded from the installed package |
+| Shared workflow manifests, run state, and verification receipts | `.engineering-harness/workflows/` in the current Git worktree |
 
 Set `ENGINEERING_HARNESS_AGENT_DIR` to use a different state directory. The launcher deliberately ignores an inherited `PI_CODING_AGENT_DIR`, so a globally installed Pi cannot accidentally supply credentials, extensions, sessions, or settings to the Harness. Existing Pi credentials are not copied; use `/login` in `engineering-harness` or provider API-key environment variables.
 
-On first launch, the Harness installs its six role definitions into its own state directory. It preserves customized role files during normal launches. Inspect or deliberately refresh them with:
+On normal launch, the Harness installs missing bundled role definitions into its own state directory and preserves customized role files. There is no separate Harness setup command.
 
-```sh
-engineering-harness setup --check
-engineering-harness setup --force
+Workflow records are committed project artifacts, not ignored runtime state. Every launch discovers the current Git worktree's valid workflow artifacts at `HEAD`, supplies their data-only summary to parent and child agents, and asks the user to select a non-terminal workflow or propose a new one. It never resumes a workflow automatically. Uncommitted workflow edits are not injected, so commit them before handoff (with the user's authorization).
+
+### Shared workflow protocol
+
+A workflow uses committed JSON artifacts under `.engineering-harness/workflows/<workflow-id>/`:
+
+```text
+manifest/<version>.json  # immutable goal, criteria, work-unit DAG, blockers, relationships
+state.json               # revisioned approval and lifecycle state
+receipts/<receipt-id>.json # append-only verification evidence
 ```
+
+A manifest version is approved as a whole. Natural-language approval is accepted only for the unique manifest version the agent has just presented; material changes produce a new approval-pending version. State progresses through `draft`, `awaiting_approval`, `approved`, `in_progress`, `verification_pending`, and `completed`, with `blocked`, `failed`, and `cancelled` as exceptional states. A passing receipt for the manifest version and a resolvable ancestor Git revision is required for `completed`.
+
+Agents use revision-based optimistic concurrency for `state.json`, and declare an unsafe merge as a blocker rather than overwriting it. Before proposing a workflow they assess existing workflows for extension, derivation, or dependency, recording a relationship on both sides. Structurally invalid workflow artifacts are silently excluded from the injected context and cannot support completion.
 
 ## Project trust and safety
 
@@ -72,8 +84,10 @@ The lead agent:
 2. Defines the goal, current state, gap, constraints, non-goals, acceptance criteria, evidence, assumptions, and risks.
 3. Refines material ambiguity before mutation.
 4. Records durable terms in `CONTEXT.md` and hard-to-reverse decisions as ADRs when warranted.
-5. Delegates only bounded, independently verifiable work.
-6. Implements the smallest coherent change, verifies focused and integration behavior, and reviews the final diff.
+5. Before proposing work, examines existing workflows for dependency, derivation, or extension; records an approval-bound manifest with a work-unit DAG and blockers.
+6. Requires contextual user approval before implementation, preserves durable run state, and completes only with a receipt that maps acceptance criteria to evidence.
+7. Delegates only bounded, independently verifiable work.
+8. Implements the smallest coherent change, verifies focused and integration behavior, and reviews the final diff.
 
 Bundled skills:
 
@@ -154,7 +168,7 @@ npm ci --ignore-scripts
 npm test
 ```
 
-`tests/test-install.sh` covers the legacy resource installer. `tests/test-standalone-cli.sh` packs the npm artifact, installs it into a disposable prefix, removes any global `pi` from `PATH`, verifies the standalone binary and resource provenance, checks state isolation from `~/.pi`, and uses a local mock model to prove a delegated child re-enters the bundled wrapper. `tests/test-release-automation.sh` validates Conventional Commit release configuration and the token-gated Homebrew Formula synchronizer without external network calls.
+`tests/test-install.sh` covers the legacy resource installer. `tests/test-standalone-cli.sh` packs the npm artifact, installs it into a disposable prefix, removes any global `pi` from `PATH`, verifies the standalone binary and resource provenance, checks state isolation from `~/.pi`, validates project-local workflow-context discovery and invalid-artifact exclusion, and uses a local mock model to prove a delegated child re-enters the bundled wrapper. `tests/test-release-automation.sh` validates Conventional Commit release configuration and the token-gated Homebrew Formula synchronizer without external network calls.
 
 ## Repository layout
 
@@ -170,6 +184,7 @@ npm test
 ├── .github/workflows/release.yml
 ├── scripts/sync-homebrew-formula.mjs
 ├── docs/adr/                   # durable architecture decisions
+├── .engineering-harness/       # committed workflow state in consumer projects
 ├── install.sh                  # optional legacy resource installer
 └── tests/
 ```
