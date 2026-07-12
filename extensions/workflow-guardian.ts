@@ -377,7 +377,7 @@ export default function workflowGuardian(pi: ExtensionAPI) {
     parameters: Type.Object({ workflowId: Type.String(), expectedRevision: Type.Integer(), reason: Type.String() }),
     async execute(_id, params, _signal, _update, ctx) {
       const workflow = stateFor(ctx.cwd, params.workflowId);
-      writeState(workflow, params.expectedRevision, (state) => { state.phase = "refinement"; state.evidence.reopened = { reason: params.reason, at: now() }; state.evidence.sharedUnderstanding = false; state.evidence.approval = false; });
+      writeState(workflow, params.expectedRevision, (state) => { state.phase = "refinement"; state.evidence.reopened = { reason: params.reason, at: now(), invalidatedManifestVersion: state.manifestVersion }; state.evidence.sharedUnderstanding = false; state.evidence.approval = false; delete state.evidence.planProposed; });
       selectedWorkflowId = params.workflowId; refresh(ctx);
       return { content: [{ type: "text", text: "Workflow reopened for requirements refinement; propose a new manifest version before execution." }], details: {} };
     },
@@ -391,7 +391,7 @@ export default function workflowGuardian(pi: ExtensionAPI) {
     async execute(_id, params, _signal, _update, ctx) {
       if (!ctx.hasUI) throw new Error("Approval requires an interactive UI.");
       const workflow = stateFor(ctx.cwd, params.workflowId);
-      if (workflow.state.phase !== "planning" || !canEnterPlanning(workflow.state) || workflow.state.evidence.planProposed !== workflow.manifest.version) throw new Error("A validated successor plan is required before approval.");
+      if (workflow.state.phase !== "planning" || !canEnterPlanning(workflow.state) || workflow.state.evidence.planProposed !== workflow.manifest.version || (workflow.state.evidence.reopened && workflow.manifest.version <= workflow.state.evidence.reopened.invalidatedManifestVersion)) throw new Error("A validated successor plan is required before approval.");
       const approved = await ctx.ui.confirm("Approve workflow", `Approve ${params.workflowId} manifest v${workflow.manifest.version}?`);
       if (!approved) return { content: [{ type: "text", text: "Approval declined; workflow remains in planning." }], details: {} };
       writeState(workflow, params.expectedRevision, (state) => { state.phase = "awaiting_approval"; state.evidence.approval = true; });
@@ -426,7 +426,7 @@ export default function workflowGuardian(pi: ExtensionAPI) {
     async execute(_id, params, _signal, _update, ctx) {
       const workflow = stateFor(ctx.cwd, params.workflowId);
       if (workflow.state.phase !== "verification" || !Object.values(workflow.state.workUnits).every((unit: any) => unit.status === "completed")) throw new Error("All work units must be completed before workflow verification.");
-      if (!workflow.state.delegations.some((entry: any) => entry.status === "reported" && ["verifier", "reviewer"].includes(entry.role) && !entry.isError)) throw new Error("Independent verification evidence is required.");
+      if (!workflow.state.delegations.some((entry: any) => entry.status === "accepted" && ["verifier", "reviewer"].includes(entry.role) && !entry.isError)) throw new Error("Independent verification evidence is required.");
       if (workflow.state.revision !== params.expectedRevision) throw new Error("Workflow revision changed; reload before recording verification.");
       let testResult;
       try { testResult = execFileSync("npm", ["test"], { cwd: ctx.cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }); } catch (error) { throw new Error(`npm test failed: ${error instanceof Error ? error.message : String(error)}`); }
