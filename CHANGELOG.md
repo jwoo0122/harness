@@ -1,3 +1,10 @@
+## [2.0.3](https://github.com/jwoo0122/engineering-harness-skills/compare/v2.0.2...v2.0.3) (2026-07-12)
+
+
+### Bug Fixes
+
+* **launcher:** resolve bundled runtime dependencies ([#7](https://github.com/jwoo0122/engineering-harness-skills/issues/7)) ([61a9a4e](https://github.com/jwoo0122/engineering-harness-skills/commit/61a9a4eff8e119f6a065f2ca1c50c2d264486a4b))
+
 ## [2.0.2](https://github.com/jwoo0122/engineering-harness-skills/compare/v2.0.1...v2.0.2) (2026-07-12)
 
 
