@@ -14,7 +14,7 @@ Harness is an external harness, like Gajae-Code: it runs beside the repository y
 The CLI validates the active Node.js version before it loads the runtime. An unsupported version prints the detected executable and the required version, then exits without starting the harness.
 
 ```sh
-npm install -g --ignore-scripts @jwoo0122/engineering-harness-skills
+npm install -g --ignore-scripts @jwoo0122/harness
 hrn
 ```
 
@@ -32,14 +32,13 @@ The underlying Pi command-line flags remain available. For example:
 
 ```sh
 hrn "Inspect this repository and define acceptance criteria."
-hrn -p "Summarize the current architecture."
 hrn --model anthropic/claude-sonnet-4-5
 hrn --pi-help
 ```
 
 ## What the CLI owns
 
-The command launches the bundled `@earendil-works/pi-coding-agent@0.80.6` directly, with absolute paths to the bundled Harness skills, runtime guidance (`resources/AGENTS.md`), and `pi-sub-agent` extension. Its subagents re-execute the same wrapper, so they use the bundled runtime rather than searching `PATH` for a global `pi` executable.
+The command launches the bundled `@earendil-works/pi-coding-agent@0.80.6` directly, with a trusted Harness guardian extension, runtime guidance (`resources/AGENTS.md`), and `pi-sub-agent` extension. Its subagents re-execute the same wrapper, so they use the bundled runtime rather than searching `PATH` for a global `pi` executable.
 
 Harness state is isolated from Pi's normal state:
 
@@ -47,7 +46,7 @@ Harness state is isolated from Pi's normal state:
 | --- | --- |
 | Authentication, settings, trust decisions, and sessions | `~/.engineering-harness/agent/` |
 | Harness-owned subagent roles | `~/.engineering-harness/agent/agents/` |
-| Bundled skills and global Harness guidance | Loaded from the installed package |
+| Guardian extension and global Harness guidance | Loaded from the installed package |
 | Shared workflow manifests, run state, and verification receipts | `.engineering-harness/workflows/` in the current Git worktree |
 
 Set `ENGINEERING_HARNESS_AGENT_DIR` to use a different state directory. The launcher deliberately ignores an inherited `PI_CODING_AGENT_DIR`, so a globally installed Pi cannot accidentally supply credentials, extensions, sessions, or settings to Harness. Existing Pi credentials are not copied; use `/login` in `hrn` or provider API-key environment variables. Harness sets and enforces `quietStartup: true` in this isolated state, so the Pi startup header and its Context, Skills, and Extensions lists stay hidden even when trusted project settings set it to `false`; pass `--verbose` only when diagnosing the bundled runtime.
@@ -72,47 +71,32 @@ Agents use revision-based optimistic concurrency for `state.json`, and declare a
 
 ## Project trust and safety
 
-Pi's project-trust behavior remains intact for project-local `.pi` resources; review them before approving. The Harness disables automatic Skill discovery so an ambient `~/.agents/skills` entry cannot override its bundled workflow. Add an extra reviewed Skill explicitly with Pi's `--skill <path>` flag. For a one-off non-interactive run, pass Pi's `--approve` or `--no-approve` flag deliberately.
+The guardian loads before the bundled subagent extension. Harness disables automatic Skill and extension discovery, rejects caller-supplied Skill and extension paths, and supports only the interactive TUI; print, JSON, and RPC workflow runs are rejected. Project-local Pi resources therefore cannot replace the guarded workflow path.
 
 The Harness runs with your user permissions. Bundled skills, project instructions, extensions, and delegated tasks can direct the agent to execute commands or edit files. Use only in repositories you trust, review model output, and avoid providing credentials with more scope than the task requires.
 
-## Included workflow
+## Enforced workflow
 
-The lead agent:
+The guardian enforces this lifecycle in the interactive TUI:
 
-1. Inspects relevant source, callers, tests, CI, documentation, and working-tree state.
-2. Defines the goal, current state, gap, constraints, non-goals, acceptance criteria, evidence, assumptions, and risks.
-3. Refines material ambiguity before mutation.
-4. Records durable terms in `CONTEXT.md` and hard-to-reverse decisions as ADRs when warranted.
-5. Before proposing work, examines existing workflows for dependency, derivation, or extension; records an approval-bound manifest with a work-unit DAG and blockers.
-6. Requires contextual user approval before implementation, preserves durable run state, and completes only with a receipt that maps acceptance criteria to evidence.
-7. Delegates only bounded, independently verifiable work.
-8. Implements the smallest coherent change, verifies focused and integration behavior, and reviews the final diff.
+1. **Intake** records the requested goal.
+2. **Refinement** asks and records one ordered question at a time, separating facts from decisions.
+3. **Domain modeling** records resolved terms in `CONTEXT.md` and user-confirmed ADRs.
+4. **Planning** validates a work contract and every work unit's purpose, scope, dependencies, blockers, criteria, verification, and stop conditions.
+5. **Approval** requires a confirmation for the exact manifest version.
+6. **Execution** permits one dependency-ready work unit and requires independent verifier or reviewer evidence before it completes.
+7. **Verification** records an evidence-backed receipt.
 
-Bundled skills:
+Every delegation first creates a checkpointed, structured reservation. Roles are phase-limited: analysis roles are read-only during refinement and planning; implementers work only after approval; verifiers and reviewers provide independent evidence. v1 workflow artifacts remain visible as legacy read-only context; create or migrate to v2 before progressing them.
 
-- `engineering-lead`
-- `grill-with-docs`
-- `grilling`
-- `domain-modeling`
-
-Bundled Harness roles:
-
-- `requirements-analyst`
-- `explorer`
-- `architect`
-- `implementer`
-- `verifier`
-- `reviewer`
-
-Use `/skill:engineering-lead` in an interactive session when the task needs the full workflow. The `subagent` tool is available immediately and launches isolated child Harness processes.
+The editor shows the current workflow phase below the input and a prioritized work list of at most five lines above it. When space is limited, remaining work is shown before completed work; completed work is dimmed and struck through, and the active work unit displays a spinner.
 
 ## Update and migration
 
 Update the CLI and its bundled runtime together:
 
 ```sh
-npm install -g --ignore-scripts @jwoo0122/engineering-harness-skills
+npm install -g --ignore-scripts @jwoo0122/harness
 ```
 
 Run `hrn` after updating. Do not run `pi update` for this installation.
@@ -121,7 +105,7 @@ The legacy distribution was installed as a Pi package with `pi install npm:engin
 
 ```sh
 pi remove npm:engineering-harness-skills
-npm install -g --ignore-scripts @jwoo0122/engineering-harness-skills
+npm install -g --ignore-scripts @jwoo0122/harness
 ```
 
 The legacy Pi-package path required a separately installed `pi` executable and is not supported for new installations.
@@ -168,7 +152,7 @@ npm ci --ignore-scripts
 npm test
 ```
 
-`tests/test-install.sh` covers the legacy resource installer. `tests/test-standalone-cli.sh` packs the npm artifact, installs it into a disposable prefix, removes any global `pi` from `PATH`, verifies the standalone binary and resource provenance, checks state isolation from `~/.pi`, validates project-local workflow-context discovery and invalid-artifact exclusion, and uses a local mock model to prove a delegated child re-enters the bundled wrapper. `tests/test-release-automation.sh` validates Conventional Commit release configuration and the token-gated Homebrew Formula synchronizer without external network calls.
+`tests/test-install.sh` covers the legacy resource installer. `tests/test-standalone-cli.sh` packs the npm artifact, installs it into a disposable prefix, verifies the guardian and protocol resources, rejects non-interactive and caller-supplied workflow paths, and validates committed v1 and v2 workflow-context discovery. `tests/test-release-automation.sh` validates Conventional Commit release configuration and the token-gated Homebrew Formula synchronizer without external network calls.
 
 ## Repository layout
 

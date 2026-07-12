@@ -17,7 +17,7 @@ HARNESS_HOME="$TEST_HOME" "$ROOT/install.sh"
 
 grep -F '<!-- engineering-harness:start -->' "$TEST_HOME/.codex/AGENTS.md" >/dev/null
 grep -F '# Existing personal guidance' "$TEST_HOME/.codex/AGENTS.md" >/dev/null
-grep -F 'Act as the lead engineer responsible for delivering a working, verified result.' "$TEST_HOME/.codex/AGENTS.md" >/dev/null
+grep -F 'Harness is an interactive, Pi-internal workflow runtime.' "$TEST_HOME/.codex/AGENTS.md" >/dev/null
 if grep -F 'All commits intended for `main`' "$TEST_HOME/.codex/AGENTS.md" >/dev/null; then
   printf '%s\n' 'contributor instructions leaked into installed runtime guidance' >&2
   exit 1

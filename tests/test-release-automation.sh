@@ -16,7 +16,7 @@ import { pathToFileURL } from "node:url";
 
 const root = process.env.ROOT;
 const packageManifest = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"));
-assert.equal(packageManifest.name, "@jwoo0122/engineering-harness-skills");
+assert.equal(packageManifest.name, "@jwoo0122/harness");
 assert.equal(packageManifest.publishConfig.access, "public");
 const releaseConfig = JSON.parse(readFileSync(resolve(root, ".releaserc.json"), "utf8"));
 assert.deepEqual(releaseConfig.branches, ["main"]);
@@ -70,14 +70,14 @@ assert.match(oldFormula, /#\{bin\}\/hrn --version/);
 const requests = [];
 const fetchImpl = async (url, options = {}) => {
   requests.push({ url: String(url), options });
-  if (url === "https://registry.npmjs.org/@jwoo0122%2Fengineering-harness-skills/1.2.3") {
+  if (url === "https://registry.npmjs.org/@jwoo0122%2Fharness/1.2.3") {
     return Response.json({
       dist: {
-        tarball: "https://registry.npmjs.org/@jwoo0122/engineering-harness-skills/-/engineering-harness-skills-1.2.3.tgz",
+        tarball: "https://registry.npmjs.org/@jwoo0122/harness/-/harness-1.2.3.tgz",
       },
     });
   }
-  if (url === "https://registry.npmjs.org/@jwoo0122/engineering-harness-skills/-/engineering-harness-skills-1.2.3.tgz") {
+  if (url === "https://registry.npmjs.org/@jwoo0122/harness/-/harness-1.2.3.tgz") {
     return new Response(tarball);
   }
   if (url === "https://api.github.com/repos/jwoo0122/homebrew-tap/contents/Formula/engineering-harness.rb" && !options.method) {
@@ -86,7 +86,7 @@ const fetchImpl = async (url, options = {}) => {
   if (url === "https://api.github.com/repos/jwoo0122/homebrew-tap/contents/Formula/engineering-harness.rb" && options.method === "PUT") {
     const payload = JSON.parse(options.body);
     const formula = Buffer.from(payload.content, "base64").toString("utf8");
-    assert.ok(formula.includes('url "https://registry.npmjs.org/@jwoo0122/engineering-harness-skills/-/engineering-harness-skills-1.2.3.tgz"'));
+    assert.ok(formula.includes('url "https://registry.npmjs.org/@jwoo0122/harness/-/harness-1.2.3.tgz"'));
     assert.match(formula, new RegExp(sha256));
     assert.equal(payload.branch, "main");
     assert.equal(payload.sha, "existing-formula-sha");
@@ -106,14 +106,14 @@ assert.equal(requests.length, 4);
 const createdRequests = [];
 const createFormulaFetch = async (url, options = {}) => {
   createdRequests.push({ url: String(url), options });
-  if (url === "https://registry.npmjs.org/@jwoo0122%2Fengineering-harness-skills/1.2.4") {
+  if (url === "https://registry.npmjs.org/@jwoo0122%2Fharness/1.2.4") {
     return Response.json({
       dist: {
-        tarball: "https://registry.npmjs.org/@jwoo0122/engineering-harness-skills/-/engineering-harness-skills-1.2.4.tgz",
+        tarball: "https://registry.npmjs.org/@jwoo0122/harness/-/harness-1.2.4.tgz",
       },
     });
   }
-  if (url === "https://registry.npmjs.org/@jwoo0122/engineering-harness-skills/-/engineering-harness-skills-1.2.4.tgz") {
+  if (url === "https://registry.npmjs.org/@jwoo0122/harness/-/harness-1.2.4.tgz") {
     return new Response(tarball);
   }
   if (url === "https://api.github.com/repos/jwoo0122/homebrew-tap/contents/Formula/engineering-harness.rb" && !options.method) {
@@ -171,7 +171,7 @@ grep -F 'All commits intended for `main`' "$ROOT/AGENTS.md" >/dev/null
 grep -F 'Conventional Commit' "$ROOT/CONTRIBUTING.md" >/dev/null
 grep -F '2FA bypass' "$ROOT/CONTRIBUTING.md" >/dev/null
 grep -F 'Trusted Publishing' "$ROOT/CONTRIBUTING.md" >/dev/null
-grep -F 'Act as the lead engineer responsible for delivering a working, verified result.' "$ROOT/resources/AGENTS.md" >/dev/null
+grep -F 'Harness is an interactive, Pi-internal workflow runtime.' "$ROOT/resources/AGENTS.md" >/dev/null
 RELEASE_OUTPUT=$(mktemp "${TMPDIR:-/tmp}/engineering-harness-release-output.XXXXXX")
 trap 'rm -f "$RELEASE_OUTPUT"' EXIT HUP INT TERM
 GITHUB_OUTPUT="$RELEASE_OUTPUT" node "$ROOT/scripts/write-release-output.mjs" 1.2.3
@@ -181,7 +181,7 @@ PACK_JSON=$(cd "$ROOT" && npm pack --dry-run --json --ignore-scripts)
 PACK_JSON="$PACK_JSON" node --input-type=module <<'EOF'
 import assert from "node:assert/strict";
 const packed = JSON.parse(process.env.PACK_JSON);
-assert.equal(packed[0].name, "@jwoo0122/engineering-harness-skills");
+assert.equal(packed[0].name, "@jwoo0122/harness");
 const files = packed[0].files.map((entry) => entry.path);
 assert(files.includes("resources/AGENTS.md"));
 assert(!files.includes("AGENTS.md"));

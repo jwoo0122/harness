@@ -67,3 +67,15 @@ _Avoid_: automatic resume, implicit workflow choice
 **Invalid Workflow Artifact**:
 A workflow artifact that cannot satisfy the protocol’s structural or reference rules. Harness excludes it from context injection, selection, and completion evidence without modifying it.
 _Avoid_: blocked workflow, inferred recovery
+
+**Guardian Runtime**:
+The trusted Harness extension that is the only Pi-mediated authority for workflow transitions, delegation reservations, and phase-specific tool access.
+_Avoid_: workflow skill, prompt-only enforcement
+
+**Workflow Phase**:
+The durable v2 position of a governed workflow: intake, refinement, planning, awaiting approval, execution, verification, or completed. A phase can advance only when its required evidence exists.
+_Avoid_: inferred progress, session mode
+
+**Delegation Reservation**:
+A recorded, bounded contract that authorizes one subagent role, exact task, permitted phase, verification method, and stop conditions before the native subagent tool can run.
+_Avoid_: free-form delegation, implicit handoff

@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "workflowId": "enforced-workflow-runtime",
+  "manifestVersion": 4,
+  "revision": 12,
+  "status": "in_progress",
+  "approval": {
+    "status": "approved"
+  },
+  "updatedAt": "2026-07-12T15:08:13Z",
+  "workUnits": {
+    "protocol-model": {
+      "status": "completed"
+    },
+    "guardian-authorization": {
+      "status": "completed"
+    },
+    "launcher-boundary": {
+      "status": "completed"
+    },
+    "workflow-ui": {
+      "status": "completed"
+    },
+    "documentation": {
+      "status": "completed"
+    },
+    "verification": {
+      "status": "in_progress"
+    },
+    "release-contract": {
+      "status": "completed"
+    },
+    "guardian-reliability": {
+      "status": "completed"
+    },
+    "v4-remediation": {
+      "status": "completed"
+    }
+  }
+}
