@@ -1,3 +1,10 @@
+## [2.0.1](https://github.com/jwoo0122/engineering-harness-skills/compare/v2.0.0...v2.0.1) (2026-07-12)
+
+
+### Bug Fixes
+
+* **ci:** enable npm trusted publishing ([5684bdf](https://github.com/jwoo0122/engineering-harness-skills/commit/5684bdf13127e4f52f9e084d5b65eefe78ad5e77))
+
 # [2.0.0](https://github.com/jwoo0122/engineering-harness-skills/compare/v1.0.0...v2.0.0) (2026-07-12)
 
 
