@@ -1,3 +1,15 @@
+# [2.2.0](https://github.com/jwoo0122/harness/compare/v2.1.0...v2.2.0) (2026-07-12)
+
+
+### Bug Fixes
+
+* package.json repository url ([2815f86](https://github.com/jwoo0122/harness/commit/2815f86ef9954d5f004184521673ae07688b7dcc))
+
+
+### Features
+
+* **runtime:** enforce Harness workflow lifecycle ([#10](https://github.com/jwoo0122/harness/issues/10)) ([7a6197c](https://github.com/jwoo0122/harness/commit/7a6197ce7948a74996380621046943fd37701d78))
+
 # [2.1.0](https://github.com/jwoo0122/engineering-harness-skills/compare/v2.0.3...v2.1.0) (2026-07-12)
 
 
