@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "workflowId": "self-commit-guardian-transitions",
   "manifestVersion": 3,
-  "revision": 23,
+  "revision": 25,
   "phase": "execution",
   "evidence": {
     "refinement": {
@@ -87,8 +87,11 @@
       "role": "reviewer",
       "workUnitId": "implement-git-independent-guardian",
       "task": "[[harness-delegation:delegation-23]]\nRole: reviewer\nPurpose: Re-review the implemented Git-independent Guardian behavior after the runtime contract was clarified to make parent-only autonomous harness_git access an explicit, user-approved exception to normal phase mutation controls.\nInputs: User decision requiring autonomous Git control at any time; ADR docs/adr/0001-decouple-guardian-transitions-from-git-state.md; modified Guardian, workflow context, resources, README, tests, and prior review finding.\nRead-only dependencies: Repository source, workflow artifacts, prior reviewer finding, Git diff, and test results.\nProhibited scope: Do not edit files, create commits, alter workflow artifacts, or reject the explicit autonomous-Git decision; identify only behavior inconsistent with that decision or weakened non-Git evidence gates.\nVerification: Inspect the final diff and map Git-independence, retained non-Git gates, explicit autonomous Git exception, and regression coverage to code and tests.\nStop conditions: Report PARTIAL if any Git-derived transition condition remains or any non-Git evidence gate is weakened; report BLOCKED only for a missing prerequisite.\nReturn status, evidence, files changed, verification performed, assumptions, remaining risks, and unresolved issues.",
-      "status": "reserved",
-      "createdAt": "2026-07-12T17:14:57Z"
+      "status": "rejected",
+      "createdAt": "2026-07-12T17:14:57Z",
+      "reportedAt": "2026-07-12T17:18:39Z",
+      "isError": false,
+      "parentEvidence": "Reviewer identified a security bypass: arbitrary Git aliases can execute shell code before execution. Preserve the user-approved parent-only autonomous Git capability while restricting it to built-in Git commands in the current project and adding a regression test that rejects alias/global-option injection."
     }
   ],
   "workUnits": {
@@ -99,5 +102,5 @@
       "status": "pending"
     }
   },
-  "updatedAt": "2026-07-12T17:14:57Z"
+  "updatedAt": "2026-07-12T17:19:13Z"
 }

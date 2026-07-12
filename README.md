@@ -87,7 +87,7 @@ The guardian enforces this lifecycle in the interactive TUI:
 6. **Execution** permits one dependency-ready work unit and requires independent verifier or reviewer evidence before it completes.
 7. **Verification** records an evidence-backed receipt.
 
-Every delegation first creates a structured reservation. Roles are phase-limited: analysis roles are read-only during refinement and planning; implementers work only after approval; verifiers and reviewers provide independent evidence. The `harness_git` tool lets the parent agent run Git commands when useful, but neither commits nor Git state are workflow prerequisites. v1 workflow artifacts remain visible as legacy read-only context; create or migrate to v2 before progressing them.
+Every delegation first creates a structured reservation. Roles are phase-limited: analysis roles are read-only during refinement and planning; implementers work only after approval; verifiers and reviewers provide independent evidence. The `harness_git` tool lets the parent agent run supported built-in Git commands in the current project when useful, but neither commits nor Git state are workflow prerequisites. v1 workflow artifacts remain visible as legacy read-only context; create or migrate to v2 before progressing them.
 
 The editor shows the current workflow phase below the input and a prioritized work list of at most five lines above it. When space is limited, remaining work is shown before completed work; completed work is dimmed and struck through, and the active work unit displays a spinner.
 
