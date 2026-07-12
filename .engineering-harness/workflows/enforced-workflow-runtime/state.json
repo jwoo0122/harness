@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "workflowId": "enforced-workflow-runtime",
+  "manifestVersion": 1,
+  "revision": 2,
+  "status": "approved",
+  "approval": {"status": "approved"},
+  "updatedAt": "2026-07-12T11:47:20Z",
+  "workUnits": {
+    "protocol-model": {"status": "pending"},
+    "guardian-authorization": {"status": "pending"},
+    "launcher-boundary": {"status": "pending"},
+    "workflow-ui": {"status": "pending"},
+    "documentation": {"status": "pending"},
+    "verification": {"status": "pending"}
+  }
+}

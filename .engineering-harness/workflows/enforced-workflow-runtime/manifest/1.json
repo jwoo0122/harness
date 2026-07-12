@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "workflowId": "enforced-workflow-runtime",
+  "version": 1,
+  "title": "Enforce the Harness workflow at runtime",
+  "goal": "Replace skill-led requirements, planning, approval, delegation, execution, and verification with a Pi-internal, evidence-based Harness state machine.",
+  "acceptanceCriteria": [
+    {"id": "runtime-boundary", "description": "hrn loads no workflow skills, rejects non-interactive workflow execution, and uses a guardian as its only workflow-state writer."},
+    {"id": "refinement-gates", "description": "A durable ordered refinement, domain-modeling, and shared-understanding gate precedes planning."},
+    {"id": "plan-and-approval", "description": "Only a structurally verifiable plan and a specific interactive user approval can permit execution."},
+    {"id": "delegation-gates", "description": "Structured, role-limited delegation with recorded evidence is required before a subagent may run."},
+    {"id": "tool-authorization", "description": "Pi-mediated mutation, shell, workflow-artifact, and delegation access is phase- and work-unit-gated."},
+    {"id": "workflow-ui", "description": "The TUI shows the current phase below the editor and a prioritized five-line-or-fewer work list above it."},
+    {"id": "documentation-and-verification", "description": "Architecture documentation and regression, package, and repository verification cover the new contract."}
+  ],
+  "workUnits": [
+    {"id": "protocol-model", "title": "Implement v2 protocol and evidence model", "dependsOn": [], "blockers": [], "acceptanceCriteria": ["refinement-gates", "plan-and-approval"]},
+    {"id": "guardian-authorization", "title": "Implement guardian transitions and tool authorization", "dependsOn": ["protocol-model"], "blockers": [], "acceptanceCriteria": ["runtime-boundary", "delegation-gates", "tool-authorization"]},
+    {"id": "launcher-boundary", "title": "Harden launcher resource and mode boundaries", "dependsOn": ["guardian-authorization"], "blockers": [], "acceptanceCriteria": ["runtime-boundary"]},
+    {"id": "workflow-ui", "title": "Render workflow stage and prioritized work list", "dependsOn": ["protocol-model", "guardian-authorization"], "blockers": [], "acceptanceCriteria": ["workflow-ui"]},
+    {"id": "documentation", "title": "Document the enforced workflow architecture", "dependsOn": ["protocol-model", "guardian-authorization", "launcher-boundary", "workflow-ui"], "blockers": [], "acceptanceCriteria": ["documentation-and-verification"]},
+    {"id": "verification", "title": "Add regression coverage and run repository verification", "dependsOn": ["protocol-model", "guardian-authorization", "launcher-boundary", "workflow-ui", "documentation"], "blockers": [], "acceptanceCriteria": ["documentation-and-verification"]}
+  ],
+  "relationships": []
+}
