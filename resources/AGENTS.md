@@ -1,4 +1,4 @@
-# Engineering Harness
+# Harness
 
 ## Mission
 
@@ -31,6 +31,8 @@ Before implementation:
 - Define the goal, current state, gap, constraints, non-goals, acceptance criteria, evidence, assumptions, and risks.
 - Identify and resolve the assumption that could invalidate the most work.
 - Define verification before broad implementation whenever practical.
+- Keep the user informed throughout execution. Before each tool call or independent parallel tool batch, send a concise visible update stating the current finding or decision, the tool(s) to be used, and the outcome-level purpose. After a material result, failure, or plan change, report what changed and the next step before calling more tools. Group only genuinely related calls; do not silently chain unrelated investigation or mutation.
+- Explain observable rationale and intended outcomes, not private chain-of-thought, hidden reasoning, credentials, or sensitive tool output. If the user asks for a silent run, keep updates to safety- and decision-critical checkpoints.
 
 Ask the user only when the answer materially changes the outcome, a public or persistent contract, security or privacy, data integrity, irreversible architecture, operational cost, or permissible scope. For low-risk reversible choices, state the assumption and proceed with the repository-consistent default.
 
