@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "workflowId": "self-commit-guardian-transitions",
   "manifestVersion": 3,
-  "revision": 20,
+  "revision": 22,
   "phase": "execution",
   "evidence": {
     "refinement": {
@@ -76,8 +76,11 @@
       "role": "reviewer",
       "workUnitId": "implement-git-independent-guardian",
       "task": "[[harness-delegation:delegation-20]]\nRole: reviewer\nPurpose: Independently review the implemented Guardian Git-decoupling change for requirement coverage, regressions, and unintended weakening of approval or verification gates.\nInputs: Original user requirement; modified extensions/workflow-guardian.ts, lib/workflow-context.js, resources/AGENTS.md, README.md, and tests/test-standalone-cli.sh; passing focused test evidence.\nRead-only dependencies: Repository source, generated workflow artifacts, test results, and Git diff.\nProhibited scope: Do not edit any files, create commits, alter workflow artifacts, or expand scope.\nVerification: Inspect the diff and relevant code paths; run read-only diagnostics or the focused test only if needed; map findings to the acceptance criteria.\nStop conditions: Report BLOCKED if review requires uncommitted changes to be committed, or REDEFINITION_REQUIRED if Git independence conflicts with preserved non-Git evidence gates.\nReturn status, evidence, files changed, verification performed, assumptions, remaining risks, and unresolved issues.",
-      "status": "reserved",
-      "createdAt": "2026-07-12T17:07:06Z"
+      "status": "rejected",
+      "createdAt": "2026-07-12T17:07:06Z",
+      "reportedAt": "2026-07-12T17:13:56Z",
+      "isError": false,
+      "parentEvidence": "Reviewer found that the intentionally phase-independent harness_git capability conflicts with the shipped statement that every pre-execution mutation is blocked. The user explicitly chose autonomous Git control, so retain the capability but revise the runtime contract to state the deliberate exception and preserve all non-Git Guardian gates."
     }
   ],
   "workUnits": {
@@ -88,5 +91,5 @@
       "status": "pending"
     }
   },
-  "updatedAt": "2026-07-12T17:07:06Z"
+  "updatedAt": "2026-07-12T17:14:36Z"
 }
