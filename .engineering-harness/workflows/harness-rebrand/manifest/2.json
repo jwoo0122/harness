@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "workflowId": "harness-rebrand",
+  "version": 2,
+  "title": "Resolve the Harness rebrand pull-request conflict",
+  "goal": "Merge the current main branch into PR #9, resolve conflicts without regressing Harness rebrand behavior, and return the pull request to a clean mergeable state.",
+  "acceptanceCriteria": [
+    {
+      "id": "conflict-resolution",
+      "description": "The PR branch incorporates origin/main and contains no unresolved conflict markers while preserving the intended Harness hrn CLI, quiet startup, and visible-progress behavior."
+    },
+    {
+      "id": "regression-verification",
+      "description": "Repository-required tests pass after conflict resolution."
+    },
+    {
+      "id": "pr-mergeable",
+      "description": "PR #9 is open and GitHub reports it as mergeable without conflicts."
+    }
+  ],
+  "workUnits": [
+    {
+      "id": "merge-main",
+      "title": "Merge current main and resolve conflicts",
+      "dependsOn": [],
+      "blockers": [],
+      "acceptanceCriteria": ["conflict-resolution"]
+    },
+    {
+      "id": "verify-resolution",
+      "title": "Run regression tests and verify PR mergeability",
+      "dependsOn": ["merge-main"],
+      "blockers": [],
+      "acceptanceCriteria": ["regression-verification", "pr-mergeable"]
+    }
+  ],
+  "relationships": []
+}
