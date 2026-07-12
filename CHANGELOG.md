@@ -1,3 +1,10 @@
+# [2.1.0](https://github.com/jwoo0122/engineering-harness-skills/compare/v2.0.3...v2.1.0) (2026-07-12)
+
+
+### Features
+
+* **workflow:** add durable project workflow protocol ([#8](https://github.com/jwoo0122/engineering-harness-skills/issues/8)) ([4419dcb](https://github.com/jwoo0122/engineering-harness-skills/commit/4419dcbc7c7aa5754131c106b2b540ace95f41f1))
+
 ## [2.0.3](https://github.com/jwoo0122/engineering-harness-skills/compare/v2.0.2...v2.0.3) (2026-07-12)
 
 
