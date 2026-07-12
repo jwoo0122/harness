@@ -48,7 +48,7 @@ When the request or design has unresolved branches, use `/skill:grill-with-docs`
 The standalone `engineering-harness` CLI loads this portable Skill, its global guidance, Harness-owned roles, and the bundled `subagent` runtime in one command:
 
 ```sh
-npm install -g engineering-harness-skills
+npm install -g @jwoo0122/engineering-harness-skills
 engineering-harness
 ```
 

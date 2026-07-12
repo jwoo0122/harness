@@ -35,7 +35,7 @@ grep -F 'Do not implement' "$TEST_HOME/.agents/skills/grill-with-docs/SKILL.md" 
 [ -f "$TEST_HOME/.pi/agent/AGENTS.md" ]
 [ "$(grep -c '<!-- engineering-harness:start -->' "$TEST_HOME/.pi/agent/AGENTS.md")" -eq 1 ]
 [ -d "$TEST_HOME/.codex/engineering-harness/backups" ]
-grep -F 'engineering-harness-skills' "$TEST_HOME/.agents/skills/engineering-lead/SKILL.md" >/dev/null
+grep -F '@jwoo0122/engineering-harness-skills' "$TEST_HOME/.agents/skills/engineering-lead/SKILL.md" >/dev/null
 
 for role in requirements-analyst explorer architect implementer verifier reviewer; do
   role_file="$TEST_HOME/.pi/agent/agents/$role.md"

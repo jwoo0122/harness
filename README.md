@@ -14,7 +14,7 @@ A standalone engineering-agent CLI for requirements refinement, ADR-centered des
 The CLI validates the active Node.js version before it loads the runtime. An unsupported version prints the detected executable and the required version, then exits without starting the harness.
 
 ```sh
-npm install -g --ignore-scripts engineering-harness-skills
+npm install -g --ignore-scripts @jwoo0122/engineering-harness-skills
 engineering-harness
 ```
 
@@ -98,7 +98,7 @@ Use `/skill:engineering-lead` in an interactive session when the task needs the 
 Update the CLI and its bundled runtime together:
 
 ```sh
-npm install -g --ignore-scripts engineering-harness-skills
+npm install -g --ignore-scripts @jwoo0122/engineering-harness-skills
 ```
 
 Do not run `pi update` for this installation.
@@ -107,7 +107,7 @@ The legacy distribution was installed as a Pi package with `pi install npm:engin
 
 ```sh
 pi remove npm:engineering-harness-skills
-npm install -g --ignore-scripts engineering-harness-skills
+npm install -g --ignore-scripts @jwoo0122/engineering-harness-skills
 ```
 
 The legacy Pi-package path required a separately installed `pi` executable and is not supported for new installations.

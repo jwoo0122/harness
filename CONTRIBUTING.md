@@ -42,11 +42,11 @@ Keep changes focused, preserve unrelated work, and add regression coverage for c
 
 ## Automated release and Homebrew tap
 
-A qualifying Conventional Commit merged to `main` runs Semantic Release. It calculates the semantic version, publishes `engineering-harness-skills` to npm, creates the Git tag and GitHub release, and then updates `jwoo0122/homebrew-tap`'s `Formula/engineering-harness.rb`.
+A qualifying Conventional Commit merged to `main` runs Semantic Release. It calculates the semantic version, publishes `@jwoo0122/engineering-harness-skills` to npm, creates the Git tag and GitHub release, and then updates `jwoo0122/homebrew-tap`'s `Formula/engineering-harness.rb`.
 
 Repository maintainers must configure these GitHub Actions secrets before the first release:
 
-- `NPM_TOKEN`: npm automation or granular token with publish access to `engineering-harness-skills`.
+- `NPM_TOKEN`: npm automation or granular token with publish access to `@jwoo0122/engineering-harness-skills`.
 - `HOMEBREW_TAP_TOKEN`: fine-grained token limited to Contents read/write on `jwoo0122/homebrew-tap`.
 
 The sync step creates or updates `Formula/engineering-harness.rb` on the tap's `main` branch, including an empty new tap. Do not hand-edit release versions or checksums in this repository.

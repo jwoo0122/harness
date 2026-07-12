@@ -1,5 +1,5 @@
 {
-  "name": "engineering-harness-skills",
+  "name": "@jwoo0122/engineering-harness-skills",
   "version": "1.0.0",
   "description": "Standalone engineering harness CLI with bundled Pi runtime and bounded subagents",
   "type": "module",

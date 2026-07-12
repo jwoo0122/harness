@@ -37,12 +37,12 @@ printf '%s\n' '---' 'name: engineering-lead' 'description: poison global skill m
   npm pack --ignore-scripts --pack-destination "$TEST_ROOT" >/dev/null
 )
 
-TARBALL=$(find "$TEST_ROOT" -maxdepth 1 -name 'engineering-harness-skills-*.tgz' -print -quit)
+TARBALL=$(find "$TEST_ROOT" -maxdepth 1 -name 'jwoo0122-engineering-harness-skills-*.tgz' -print -quit)
 [ -n "$TARBALL" ]
 npm install --global --prefix "$INSTALL_ROOT" --ignore-scripts --no-audit --no-fund "$TARBALL" >/dev/null
 
 BIN="$INSTALL_ROOT/bin/engineering-harness"
-PACKAGE_INSTALL="$INSTALL_ROOT/lib/node_modules/engineering-harness-skills"
+PACKAGE_INSTALL="$INSTALL_ROOT/lib/node_modules/@jwoo0122/engineering-harness-skills"
 [ -x "$BIN" ]
 [ -d "$PACKAGE_INSTALL" ]
 [ ! -e "$NODE_ONLY_BIN/pi" ]
