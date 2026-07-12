@@ -9,6 +9,24 @@ npm test
 
 Do not run release commands, manually bump versions, publish packages, or create tags. The `main` release workflow owns those operations.
 
+## Test the packed CLI locally
+
+For changes to the shipped CLI, build the npm artifact from the current checkout and install it into a disposable global npm prefix. This validates what users install without replacing your normal global Harness or using its state. Run this POSIX-shell workflow from the repository root:
+
+```sh
+TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/engineering-harness-local.XXXXXX")
+trap 'rm -rf "$TEST_ROOT"' EXIT HUP INT TERM
+npm pack --ignore-scripts --pack-destination "$TEST_ROOT"
+TARBALL=$(find "$TEST_ROOT" -maxdepth 1 -name '*.tgz' -print -quit)
+test -n "$TARBALL"
+
+npm install --global --prefix "$TEST_ROOT/prefix" --ignore-scripts --no-audit --no-fund "$TARBALL"
+HOME="$TEST_ROOT/home" ENGINEERING_HARNESS_AGENT_DIR="$TEST_ROOT/agent" \
+  "$TEST_ROOT/prefix/bin/engineering-harness" --pi-help
+```
+
+`npm pack` creates the local package build and `--pi-help` starts the packed runtime without needing model credentials. Replace `--pi-help` with an interactive invocation after configuring `/login` or a provider API key. On Windows, use the equivalent temporary directory, `npm pack`, `npm install --global --prefix`, and generated binary command.
+
 ## Conventional Commits
 
 Every commit delivered to `main` and every pull-request title must follow:
