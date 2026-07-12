@@ -15,6 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
     outputs:
       version: ${{ steps.semantic-release.outputs.version }}
     steps:

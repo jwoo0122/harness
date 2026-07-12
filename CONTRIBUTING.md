@@ -46,7 +46,7 @@ A qualifying Conventional Commit merged to `main` runs Semantic Release. It calc
 
 Repository maintainers must configure these GitHub Actions secrets before the first release:
 
-- `NPM_TOKEN`: npm automation or granular token with publish access to `@jwoo0122/engineering-harness-skills`.
+- `NPM_TOKEN`: a temporary npm automation or granular token with publish access to `@jwoo0122/engineering-harness-skills` and 2FA bypass. Use it only to bootstrap the first scoped release.
 - `HOMEBREW_TAP_TOKEN`: fine-grained token limited to Contents read/write on `jwoo0122/homebrew-tap`.
 
-The sync step creates or updates `Formula/engineering-harness.rb` on the tap's `main` branch, including an empty new tap. Do not hand-edit release versions or checksums in this repository.
+After the first scoped release, configure npm Trusted Publishing for GitHub Actions repository `jwoo0122/engineering-harness-skills` and workflow `.github/workflows/release.yml`, then remove `NPM_TOKEN`. The release job has `id-token: write` for that OIDC flow. The sync step creates or updates `Formula/engineering-harness.rb` on the tap's `main` branch, including an empty new tap. Do not hand-edit release versions or checksums in this repository.
