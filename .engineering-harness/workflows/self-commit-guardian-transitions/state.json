@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 2,
+  "workflowId": "self-commit-guardian-transitions",
+  "manifestVersion": 3,
+  "revision": 20,
+  "phase": "execution",
+  "evidence": {
+    "refinement": {
+      "goal-and-users": {
+        "question": "Who needs the behavior and what is their goal?",
+        "answer": "Users running hrn should be able to complete a governed workflow without manually creating Git commits solely to unblock the tool; Guardian should evaluate workflow evidence independently of Git commit presence.",
+        "kind": "decision"
+      },
+      "scope-and-non-goals": {
+        "question": "Should hrn create commits automatically, or should commits become entirely unnecessary to Guardian and workflow operation?",
+        "answer": "Commits should become entirely unnecessary. hrn must not require or create commits merely to advance Guardian or the governed workflow; Guardian behavior and requirements must be independent of commits.",
+        "kind": "decision"
+      },
+      "domain-terms": {
+        "question": "What does commit-independent Guardian operation mean?",
+        "answer": "Git commit presence, HEAD changes, and a clean working tree are not Guardian state-transition requirements. Existing non-Git evidence requirements, including approval and verification receipts, remain in effect.",
+        "kind": "decision"
+      },
+      "primary-scenarios": {
+        "question": "What is the primary successful scenario?",
+        "answer": "With uncommitted changes, including user changes, Guardian allows the next state transition once all required non-Git evidence such as approval and verification is present; hrn neither requests nor creates a commit to unblock it.",
+        "kind": "decision"
+      },
+      "boundaries-and-failures": {
+        "question": "How should Git failures and missing non-Git evidence be handled?",
+        "answer": "Git status, commit, and repository availability must not block Guardian transitions. Missing required non-Git evidence, including approval or verification, must continue to block transitions under the existing rules.",
+        "kind": "decision"
+      },
+      "alternatives-and-tradeoffs": {
+        "question": "Should Git be removed entirely from hrn, made optional, or remain agent-controlled without gating Guardian?",
+        "answer": "Git remains available for the agent to manipulate autonomously at any time, regardless of a user's separate Git activity. However, Guardian transitions and workflow requirements must not depend on commits or other Git state; no commit is required merely to advance the workflow.",
+        "kind": "decision"
+      },
+      "acceptance-and-evidence": {
+        "question": "What automated acceptance evidence is required?",
+        "answer": "Automated tests prove: (1) Guardian transitions succeed with uncommitted changes and outside a Git repository when required approval and verification evidence exists; (2) missing non-Git evidence still blocks transitions; and (3) no hrn prompt, policy, or transition validator requires a user-created commit, while agent Git tooling is allowed without prior user delegation.",
+        "kind": "decision"
+      },
+      "rollout-and-verification": {
+        "question": "How should the change be rolled out and verified?",
+        "answer": "Apply the change immediately without migration or configuration, preserve existing approval and verification rules, and verify it with focused regression tests plus the maintained full test suite.",
+        "kind": "decision"
+      }
+    },
+    "terms": [
+      {
+        "term": "commit-independent Guardian operation",
+        "definition": "Guardian state transitions do not depend on Git commit presence, HEAD changes, or a clean working tree. Approval and verification evidence remain required.",
+        "recordedAt": "2026-07-12T16:52:08Z"
+      }
+    ],
+    "adrs": [
+      {
+        "title": "Decouple Guardian transitions from Git state",
+        "path": "docs/adr/0001-decouple-guardian-transitions-from-git-state.md",
+        "recordedAt": "2026-07-12T16:55:23Z"
+      }
+    ],
+    "sharedUnderstanding": true,
+    "approval": true,
+    "reopened": {
+      "reason": "Repository inspection found README.md publicly documents committed Git workflow artifacts and checkpointed delegations. Leaving it unchanged would contradict the requested Git-independent behavior, so the approved implementation scope must include its documentation update.",
+      "at": "2026-07-12T17:00:08Z",
+      "invalidatedManifestVersion": 2
+    },
+    "planProposed": 3
+  },
+  "delegations": [
+    {
+      "id": "delegation-20",
+      "role": "reviewer",
+      "workUnitId": "implement-git-independent-guardian",
+      "task": "[[harness-delegation:delegation-20]]\nRole: reviewer\nPurpose: Independently review the implemented Guardian Git-decoupling change for requirement coverage, regressions, and unintended weakening of approval or verification gates.\nInputs: Original user requirement; modified extensions/workflow-guardian.ts, lib/workflow-context.js, resources/AGENTS.md, README.md, and tests/test-standalone-cli.sh; passing focused test evidence.\nRead-only dependencies: Repository source, generated workflow artifacts, test results, and Git diff.\nProhibited scope: Do not edit any files, create commits, alter workflow artifacts, or expand scope.\nVerification: Inspect the diff and relevant code paths; run read-only diagnostics or the focused test only if needed; map findings to the acceptance criteria.\nStop conditions: Report BLOCKED if review requires uncommitted changes to be committed, or REDEFINITION_REQUIRED if Git independence conflicts with preserved non-Git evidence gates.\nReturn status, evidence, files changed, verification performed, assumptions, remaining risks, and unresolved issues.",
+      "status": "reserved",
+      "createdAt": "2026-07-12T17:07:06Z"
+    }
+  ],
+  "workUnits": {
+    "implement-git-independent-guardian": {
+      "status": "in_progress"
+    },
+    "independently-verify-guardian": {
+      "status": "pending"
+    }
+  },
+  "updatedAt": "2026-07-12T17:07:06Z"
+}

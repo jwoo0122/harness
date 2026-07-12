@@ -79,3 +79,7 @@ _Avoid_: inferred progress, session mode
 **Delegation Reservation**:
 A recorded, bounded contract that authorizes one subagent role, exact task, permitted phase, verification method, and stop conditions before the native subagent tool can run.
 _Avoid_: free-form delegation, implicit handoff
+
+**commit-independent Guardian operation**:
+Guardian state transitions do not depend on Git commit presence, HEAD changes, or a clean working tree. Approval and verification evidence remain required.
+_Avoid_: Do not interpret this as waiving approval, verification, or other non-Git evidence requirements.
