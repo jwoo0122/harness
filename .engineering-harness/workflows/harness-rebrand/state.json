@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "workflowId": "harness-rebrand",
+  "manifestVersion": 1,
+  "revision": 0,
+  "status": "approved",
+  "approval": {
+    "status": "approved"
+  },
+  "updatedAt": "2026-07-12T00:00:00Z",
+  "workUnits": {
+    "implement-cli": { "status": "pending" },
+    "update-guidance": { "status": "pending" },
+    "verify-and-submit": { "status": "pending" }
+  }
+}
