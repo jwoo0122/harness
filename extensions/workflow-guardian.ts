@@ -364,6 +364,7 @@ export default function workflowGuardian(pi: ExtensionAPI) {
       const workflow = stateFor(ctx.cwd, params.workflowId);
       const reservation = workflow.state.delegations.find((entry: any) => entry.id === params.delegationId && entry.status === "reported");
       if (!reservation) throw new Error("No reported delegation is available for parent review.");
+      if (params.accepted && !params.evidence.trim()) throw new Error("Accepted delegation evidence must be non-empty.");
       writeState(workflow, params.expectedRevision, (state) => { const entry = state.delegations.find((candidate: any) => candidate.id === params.delegationId); entry.status = params.accepted ? "accepted" : "rejected"; entry.parentEvidence = params.evidence; });
       selectedWorkflowId = params.workflowId; refresh(ctx);
       return { content: [{ type: "text", text: "Parent delegation review recorded." }], details: {} };
@@ -426,7 +427,7 @@ export default function workflowGuardian(pi: ExtensionAPI) {
     async execute(_id, params, _signal, _update, ctx) {
       const workflow = stateFor(ctx.cwd, params.workflowId);
       if (workflow.state.phase !== "verification" || !Object.values(workflow.state.workUnits).every((unit: any) => unit.status === "completed")) throw new Error("All work units must be completed before workflow verification.");
-      if (!workflow.state.delegations.some((entry: any) => entry.status === "accepted" && ["verifier", "reviewer"].includes(entry.role) && !entry.isError)) throw new Error("Independent verification evidence is required.");
+      if (!workflow.state.delegations.some((entry: any) => entry.status === "accepted" && typeof entry.parentEvidence === "string" && entry.parentEvidence.trim() && ["verifier", "reviewer"].includes(entry.role) && !entry.isError)) throw new Error("Independent verification evidence is required.");
       if (workflow.state.revision !== params.expectedRevision) throw new Error("Workflow revision changed; reload before recording verification.");
       let testResult;
       try { testResult = execFileSync("npm", ["test"], { cwd: ctx.cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }); } catch (error) { throw new Error(`npm test failed: ${error instanceof Error ? error.message : String(error)}`); }
@@ -452,7 +453,7 @@ export default function workflowGuardian(pi: ExtensionAPI) {
     async execute(_id, params, _signal, _update, ctx) {
       const workflow = stateFor(ctx.cwd, params.workflowId);
       if (workflow.state.phase !== "execution" || workflow.state.workUnits[params.workUnitId]?.status !== "in_progress") throw new Error("Only the active execution work unit may be completed.");
-      const independentEvidence = workflow.state.delegations.some((entry: any) => entry.status === "accepted" && entry.workUnitId === params.workUnitId && ["verifier", "reviewer"].includes(entry.role) && !entry.isError);
+      const independentEvidence = workflow.state.delegations.some((entry: any) => entry.status === "accepted" && typeof entry.parentEvidence === "string" && entry.parentEvidence.trim() && entry.workUnitId === params.workUnitId && ["verifier", "reviewer"].includes(entry.role) && !entry.isError);
       if (!independentEvidence) throw new Error("An independent verifier or reviewer delegation must report before completion.");
       writeState(workflow, params.expectedRevision, (state) => {
         state.workUnits[params.workUnitId] = { status: "completed", evidence: params.evidence, completedAt: now() };
