@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "workflowId": "self-commit-guardian-transitions",
   "manifestVersion": 3,
-  "revision": 29,
+  "revision": 31,
   "phase": "execution",
   "evidence": {
     "refinement": {
@@ -109,8 +109,11 @@
       "role": "reviewer",
       "workUnitId": "implement-git-independent-guardian",
       "task": "[[harness-delegation:delegation-29]]\nRole: reviewer\nPurpose: Final implementation review against the explicit user decision: parent agents may autonomously control Git at any phase in trusted projects, including configured aliases, hooks, and helpers, while Guardian state transitions remain fully independent of Git and retain all non-Git evidence gates.\nInputs: User confirmation of the explicit Git-control exception; ADR; final Guardian, workflow-context, runtime guidance, README, CONTEXT, and standalone acceptance test; prior review findings and their resolution.\nRead-only dependencies: Repository source, workflow artifacts, final branch diff, and focused test output.\nProhibited scope: Do not edit files, create commits, alter workflow artifacts, or treat the user-approved Git exception as a defect. Review only Git transition dependencies, non-Git evidence gates, test coverage, and documentation consistency.\nVerification: Inspect source and tests to verify no commit/HEAD/repository/clean-tree requirement remains; verify approval, reviewer/verifier, work-unit, and npm-test receipt gates remain; verify documentation clearly states the explicit Git exception.\nStop conditions: Report PARTIAL for an unapproved Git-derived Guardian transition gate, a weakened non-Git evidence gate, inconsistent documentation, or missing regression evidence; report BLOCKED only for missing prerequisites.\nReturn status, evidence, files changed, verification performed, assumptions, remaining risks, and unresolved issues.",
-      "status": "reserved",
-      "createdAt": "2026-07-12T17:28:18Z"
+      "status": "rejected",
+      "createdAt": "2026-07-12T17:28:18Z",
+      "reportedAt": "2026-07-12T18:23:24Z",
+      "isError": false,
+      "parentEvidence": "Reviewer execution timed out before producing evidence. The maintained npm test suite was then run by the parent and passed; no reviewer evidence is accepted from the timed-out run."
     }
   ],
   "workUnits": {
@@ -121,5 +124,5 @@
       "status": "pending"
     }
   },
-  "updatedAt": "2026-07-12T17:28:18Z"
+  "updatedAt": "2026-07-14T01:07:29Z"
 }
