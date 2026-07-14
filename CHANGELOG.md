@@ -1,3 +1,10 @@
+# [2.3.0](https://github.com/jwoo0122/harness/compare/v2.2.2...v2.3.0) (2026-07-14)
+
+
+### Features
+
+* worktree support ([cbd5f99](https://github.com/jwoo0122/harness/commit/cbd5f999f494669af2d3aefe843c5dd34c90c1dc))
+
 ## [2.2.2](https://github.com/jwoo0122/harness/compare/v2.2.1...v2.2.2) (2026-07-14)
 
 
