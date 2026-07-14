@@ -83,3 +83,7 @@ _Avoid_: free-form delegation, implicit handoff
 **commit-independent Guardian operation**:
 Guardian state transitions do not depend on Git commit presence, HEAD changes, or a clean working tree. Approval and verification evidence remain required.
 _Avoid_: Do not interpret this as waiving approval, verification, or other non-Git evidence requirements.
+
+**질문 백로그 (question backlog)**:
+요구사항 정제 단계에서 에이전트가 생성·갱신하고 Harness가 에이전트에게 지속 제공하는 미해결 질문의 영속적 목록.
+_Avoid_: 사용자에게 노출되는 질문 목록 또는 대화 로그에서 추론하는 임시 목록으로 해석하지 않는다.

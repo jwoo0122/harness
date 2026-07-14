@@ -1,0 +1,167 @@
+{
+  "schemaVersion": 2,
+  "workflowId": "adaptive-requirements-approval",
+  "manifestVersion": 4,
+  "revision": 48,
+  "phase": "completed",
+  "evidence": {
+    "refinement": {
+      "goal-and-users": {
+        "question": "이 기능의 직접 사용자는 Harness를 사용하는 코딩 에이전트와 그 사용자로 이해했습니다. 두 대상 모두가 맞으며, 특히 해결하려는 현재 사용성 문제(예: 질문 누락·불필요한 반복·승인 흐름 혼선)를 어떻게 우선순위화할까요?",
+        "answer": "맞다. Harness를 사용하는 에이전트와 사용자가 직접 사용자다. 가장 우선 해결할 문제는 질문 목록이 고정되어 있는 상태다.",
+        "kind": "fact"
+      },
+      "scope-and-non-goals": {
+        "question": "동적 질문 목록의 관리는 요구사항 정제 단계에만 적용하고, 기획·실행 단계의 작업 단위 질문이나 기존 워크플로우 데이터 구조 전반은 변경하지 않는 것으로 할까요?",
+        "answer": "동의한다. 동적 질문 목록 관리는 요구사항 정제 단계에만 적용하며, 기획·실행 단계의 작업 단위 질문 및 기존 워크플로우 데이터 구조 전반 변경은 범위에서 제외한다.",
+        "kind": "decision"
+      },
+      "domain-terms": {
+        "question": "에이전트가 생성·갱신하고 Harness가 계속 제공하는 미해결 질문 집합을 “질문 백로그(question backlog)”로 정의할까요?",
+        "answer": "동의한다. 에이전트가 생성·갱신하고 Harness가 계속 제공하는 미해결 질문 집합을 질문 백로그(question backlog)로 정의한다.",
+        "kind": "decision"
+      },
+      "primary-scenarios": {
+        "question": "에이전트는 각 사용자 답변 뒤 질문 백로그를 재검토·갱신하고, Harness는 갱신된 미해결 목록을 다음 에이전트 컨텍스트에 제공하며, 목록이 비어야만 기획 정의·제안으로 진행하도록 할까요?",
+        "answer": "그렇게 한다. 또한 에이전트는 질문 백로그에 없는 질문을 사용자에게 할 수 없게 한다.",
+        "kind": "decision"
+      },
+      "boundaries-and-failures": {
+        "question": "질문 백로그가 비어 있지 않은데 에이전트가 기획 정의·제안으로 넘어가려 하거나, 백로그에 없는 질문을 하려 하면 Harness가 해당 진행/질문을 차단하고 남은 목록을 표시하도록 할까요?",
+        "answer": "동의한다. 단, 남은 질문 목록은 사용자에게 표시하지 않고 에이전트에게 알려준다. 백로그가 비어 있지 않은 상태의 기획 정의·제안 진행과 백로그에 없는 질문은 Harness가 차단한다.",
+        "kind": "decision"
+      },
+      "alternatives-and-tradeoffs": {
+        "question": "질문 백로그를 대화 내용에서 추론하지 않고 워크플로우의 명시적·영속 상태로 저장하는 방식을 권장합니다. 그래야 Harness가 질문 허용 여부와 다음 단계 전환을 결정적으로 강제할 수 있지만, 상태 전환 API와 저장 형식 변경이 필요합니다. 이 방식을 선택할까요?",
+        "answer": "선택한다. 질문 백로그를 워크플로우의 명시적·영속 상태로 저장한다.",
+        "kind": "decision"
+      },
+      "acceptance-and-evidence": {
+        "question": "자동화 테스트로 (1) 에이전트가 질문 백로그를 만들고 답변마다 갱신하는 흐름, (2) 백로그 밖 질문 및 미해결 백로그 상태의 기획 제안 차단, (3) 백로그가 비었을 때만 제안 허용, (4) 기획 요약 직후 별도 자연어 승인 질문 없이 승인 도구를 호출하는 흐름을 검증하면 충분할까요?",
+        "answer": "동의한다. 위 네 흐름을 자동화 테스트로 검증한다.",
+        "kind": "decision"
+      },
+      "rollout-and-verification": {
+        "question": "기존 워크플로우와의 별도 마이그레이션은 하지 않고, 변경 후 전체 기존 테스트와 새 회귀 테스트를 실행해 검증하는 방식으로 할까요?",
+        "answer": "동의한다. 기존 워크플로우의 별도 마이그레이션은 하지 않으며, 변경 후 전체 기존 테스트와 새 회귀 테스트를 실행해 검증한다.",
+        "kind": "decision"
+      }
+    },
+    "terms": [
+      {
+        "term": "질문 백로그 (question backlog)",
+        "definition": "요구사항 정제 단계에서 에이전트가 생성·갱신하고 Harness가 에이전트에게 지속 제공하는 미해결 질문의 영속적 목록.",
+        "recordedAt": "2026-07-14T01:23:43Z"
+      }
+    ],
+    "adrs": [
+      {
+        "title": "Persist the requirements question backlog explicitly",
+        "path": "docs/adr/0001-persist-the-requirements-question-backlog-explicitly.md",
+        "recordedAt": "2026-07-14T01:23:48Z"
+      }
+    ],
+    "sharedUnderstanding": true,
+    "approval": true,
+    "reopened": {
+      "reason": "Independent review found a compatibility deadlock for v2 refinement or reopened workflows without questionBacklog and incomplete acceptance evidence for the prompt/tool-only enforcement boundary. The compatibility behavior and revised test ownership must be clarified before a successor plan.",
+      "at": "2026-07-14T01:41:15Z",
+      "invalidatedManifestVersion": 3
+    },
+    "planProposed": 4,
+    "verification": {
+      "receipt": ".engineering-harness/workflows/adaptive-requirements-approval/receipts/receipt-1783995582000.json",
+      "recordedAt": "2026-07-14T02:19:42Z"
+    }
+  },
+  "delegations": [
+    {
+      "id": "delegation-12",
+      "role": "explorer",
+      "task": "[[harness-delegation:delegation-12]]\nRole: explorer\nPurpose: Identify the protocol, guardian transitions, prompt rendering, and tests that implement fixed refinement questions and approval requests; propose bounded implementation touchpoints.\nInputs: Approved requirements summary, persisted question-backlog ADR, repository source and tests.\nRead-only dependencies: Current repository working tree and existing completed workflow artifacts.\nProhibited scope: No file modifications, no workflow-artifact edits, no implementation decisions beyond reporting observed code structure.\nVerification: Return affected file paths, relevant symbols, existing test commands, and risks.\nStop conditions: Stop after reporting sufficient code locations to form a manifest.\nReturn status, evidence, files changed, verification performed, assumptions, remaining risks, and unresolved issues.",
+      "status": "accepted",
+      "createdAt": "2026-07-14T01:23:52Z",
+      "reportedAt": "2026-07-14T01:25:32Z",
+      "isError": false,
+      "parentEvidence": "Read-only exploration identified the fixed REFINEMENT_TOPICS, nextRefinementTopic, and canEnterPlanning gates in lib/workflow-protocol.js; refinement and approval tools in extensions/workflow-guardian.ts; workflow prompt construction in lib/workflow-context.js; and coverage in tests/test-standalone-cli.sh. It confirmed question backlogs are absent from state and prompts, and no tests cover them. The bounded findings are accepted for planning."
+    },
+    {
+      "id": "delegation-18",
+      "role": "implementer",
+      "workUnitId": "adaptive-refinement",
+      "task": "[[harness-delegation:delegation-18]]\nRole: implementer\nPurpose: Implement the adaptive requirements question backlog and direct approval guidance for the active work unit.\nInputs: Manifest v2 acceptance criteria, persisted-backlog ADR, and existing protocol, guardian, context, and runtime guidance code.\nRead-only dependencies: Existing repository code, current workflow state, and established test conventions.\nProhibited scope: Do not modify tests, workflow artifacts, package/release files, unrelated legacy artifacts, or start another work unit.\nVerification: Report changed files and run only focused feasible checks; identify unverified behavior.\nStop conditions: Stop and report if enforcing out-of-backlog natural-language questions requires an unspecified interception mechanism or if compatibility policy is ambiguous.\nReturn status, evidence, files changed, verification performed, assumptions, remaining risks, and unresolved issues.",
+      "status": "rejected",
+      "createdAt": "2026-07-14T01:28:30Z",
+      "reportedAt": "2026-07-14T01:29:20Z",
+      "isError": false,
+      "parentEvidence": "Implementer made no edits and reported a material boundary: the Guardian only intercepts tool calls and user shell commands, so it cannot prevent an agent from emitting an unregistered natural-language question. Persisting a backlog alone would not satisfy the requested hard authorization guarantee."
+    },
+    {
+      "id": "delegation-26",
+      "role": "implementer",
+      "workUnitId": "adaptive-refinement",
+      "task": "[[harness-delegation:delegation-26]]\nRole: implementer\nPurpose: Implement the adaptive question backlog, planning gate, context and direct-approval guidance under the agreed prompt/tool-level compliance boundary.\nInputs: Manifest v3 acceptance criteria, the recorded output-enforcement boundary, and existing protocol, guardian, context, and runtime guidance code.\nRead-only dependencies: Existing repository code, workflow state, and test conventions.\nProhibited scope: Do not modify tests, workflow artifacts, package/release files, unrelated legacy artifacts, or claim runtime blocking of arbitrary assistant text.\nVerification: Report changed files and run focused feasible checks; identify behavior requiring regression tests.\nStop conditions: Stop if the backlog state/API or legacy-state compatibility cannot be implemented without an unspecified decision.\nReturn status, evidence, files changed, verification performed, assumptions, remaining risks, and unresolved issues.",
+      "status": "rejected",
+      "createdAt": "2026-07-14T01:35:07Z",
+      "reportedAt": "2026-07-14T01:35:57Z",
+      "isError": false,
+      "parentEvidence": "No code was changed. The delegated implementer could not select the active workflow because only the parent may call guardian transitions; without selection its mutation and shell tools were blocked. Parent implementation is required within the active work unit."
+    },
+    {
+      "id": "delegation-29",
+      "role": "reviewer",
+      "workUnitId": "adaptive-refinement",
+      "task": "[[harness-delegation:delegation-29]]\nRole: reviewer\nPurpose: Independently review the active adaptive-refinement implementation for correctness, scope adherence, and honest enforcement boundaries.\nInputs: Manifest v3, implemented protocol/guardian/context/guidance changes, and the passing parent test result.\nRead-only dependencies: Current working-tree diff and relevant source/test files.\nProhibited scope: No file modifications, no workflow-artifact edits, no test changes, and no claims of runtime interception of arbitrary assistant text.\nVerification: Inspect the diff and report defects, acceptance coverage, and whether the implementation may be completed.\nStop conditions: Stop after reporting review evidence and any blocking findings.\nReturn status, evidence, files changed, verification performed, assumptions, remaining risks, and unresolved issues.",
+      "status": "rejected",
+      "createdAt": "2026-07-14T01:38:23Z",
+      "reportedAt": "2026-07-14T01:40:58Z",
+      "isError": false,
+      "parentEvidence": "Independent review rejected completion. It found that legacy v2 workflows and reopened workflows lacking questionBacklog would deadlock because initialization was limited to intake, and that ADR/test evidence does not yet fully state or prove the prompt/tool-only boundary. It also noted test ownership drift requiring a successor manifest."
+    },
+    {
+      "id": "delegation-37",
+      "role": "reviewer",
+      "workUnitId": "adaptive-refinement",
+      "task": "[[harness-delegation:delegation-37]]\nRole: reviewer\nPurpose: Independently review the corrected adaptive-refinement implementation and its regression evidence against manifest v4.\nInputs: Manifest v4, current implementation and test changes, ADR boundary statement, and parent npm test result.\nRead-only dependencies: Current working-tree diff, relevant source, guidance, ADR, and test files.\nProhibited scope: No file or workflow-artifact modifications and no claims of hard interception of arbitrary assistant text.\nVerification: Assess every manifest acceptance criterion, legacy initialization compatibility, direct approval test coverage, and npm test evidence; report whether work-unit completion is warranted.\nStop conditions: Stop after providing conclusive review evidence and any blockers.\nReturn status, evidence, files changed, verification performed, assumptions, remaining risks, and unresolved issues.",
+      "status": "reported",
+      "createdAt": "2026-07-14T01:57:21Z",
+      "reportedAt": "2026-07-14T01:58:52Z",
+      "isError": false
+    },
+    {
+      "id": "delegation-39",
+      "role": "reviewer",
+      "workUnitId": "adaptive-refinement",
+      "task": "[[harness-delegation:delegation-39]]\nRole: reviewer\nPurpose: Independently review the final adaptive-refinement changes, including newly added reopened-workflow and guidance-boundary regression coverage.\nInputs: Manifest v4, final changed files, and npm test output from the parent.\nRead-only dependencies: Current source, ADR, guidance, and standalone CLI test.\nProhibited scope: No edits, workflow-artifact changes, or claims of hard assistant-text interception.\nVerification: Verify acceptance criteria and report whether the active work unit can complete.\nStop conditions: Stop after a conclusive review.\nReturn status, evidence, files changed, verification performed, assumptions, remaining risks, and unresolved issues.",
+      "status": "accepted",
+      "createdAt": "2026-07-14T02:00:57Z",
+      "reportedAt": "2026-07-14T02:02:39Z",
+      "isError": false,
+      "parentEvidence": "Independent static review found no acceptance-criteria defects and confirmed persistent backlog, legacy/reopened initialization, planning gate, context, guidance, ADR, and regression coverage. Parent independently ran npm test after the final changes; it exited 0 and all install, standalone CLI, and release automation acceptance tests passed. Remaining boundary is explicitly prompt/tool-level, not arbitrary-text interception."
+    },
+    {
+      "id": "delegation-44",
+      "role": "verifier",
+      "workUnitId": "final-verification",
+      "task": "[[harness-delegation:delegation-44]]\nRole: verifier\nPurpose: Independently verify the final implementation against manifest v4 and review the actual parent npm test result before workflow verification.\nInputs: Manifest v4, accepted reviewer evidence, final implementation files, regression test, and parent npm test output.\nRead-only dependencies: Current source, workflow state, and test files.\nProhibited scope: No modifications, no workflow-artifact edits, and no unsupported claim that arbitrary assistant text is intercepted.\nVerification: Report acceptance-criterion evidence, test-result assessment, remaining risks, and whether final verification may proceed.\nStop conditions: Stop after producing conclusive independent verification evidence.\nReturn status, evidence, files changed, verification performed, assumptions, remaining risks, and unresolved issues.",
+      "status": "accepted",
+      "createdAt": "2026-07-14T02:13:07Z",
+      "reportedAt": "2026-07-14T02:14:08Z",
+      "isError": false,
+      "parentEvidence": "Independent verifier reviewed manifest v4, implementation, guidance, ADR, and regression coverage and found all criteria statically satisfied. It correctly leaves final runtime evidence to the Guardian's required npm test run; it confirms the documented residual risk that arbitrary natural-language questions are not intercepted."
+    }
+  ],
+  "workUnits": {
+    "adaptive-refinement": {
+      "status": "completed",
+      "evidence": "Implemented and tested persistent adaptive question backlogs, answer-driven backlog updates, prompt exposure, empty-backlog planning gate, legacy/refinement/reopen initialization, direct approval guidance, and the documented prompt/tool-only boundary. npm test passed; independent reviewer accepted the final implementation.",
+      "completedAt": "2026-07-14T02:07:53Z"
+    },
+    "final-verification": {
+      "status": "completed",
+      "evidence": "Independent verifier accepted the implementation and regression evidence, with final runtime confirmation delegated to the Guardian verification receipt.",
+      "completedAt": "2026-07-14T02:19:21Z"
+    }
+  },
+  "updatedAt": "2026-07-14T02:19:42Z"
+}

@@ -96,12 +96,12 @@ const projectRoot = process.env.PLAIN_WORKFLOW_ROOT;
 const { createJiti } = await import(pathToFileURL(join(root, "node_modules", "@earendil-works", "pi-coding-agent", "node_modules", "jiti", "lib", "jiti.mjs")).href);
 const jiti = createJiti(import.meta.url);
 const extension = await jiti.import(join(root, "extensions", "workflow-guardian.ts"));
-const { discoverWorkflowContext } = await import(pathToFileURL(join(process.env.ROOT, "lib", "workflow-context.js")).href);
+const { buildWorkflowPrompt, discoverWorkflowContext } = await import(pathToFileURL(join(process.env.ROOT, "lib", "workflow-context.js")).href);
 if (typeof extension.default !== "function") throw new Error("guardian extension did not export a factory");
 const tools = new Map();
 const events = new Map();
 extension.default({ on: (name, handler) => events.set(name, handler), registerTool: (tool) => tools.set(tool.name, tool) });
-for (const name of ["harness_git", "harness_select_workflow", "harness_begin_workflow", "harness_refine_requirement", "harness_record_term", "harness_record_adr", "harness_propose_plan", "harness_reserve_delegation", "harness_request_approval", "harness_start_work_unit", "harness_complete_work_unit", "harness_record_verification"]) {
+for (const name of ["harness_git", "harness_select_workflow", "harness_begin_workflow", "harness_update_question_backlog", "harness_record_term", "harness_record_adr", "harness_propose_plan", "harness_reserve_delegation", "harness_request_approval", "harness_start_work_unit", "harness_complete_work_unit", "harness_record_verification"]) {
   if (!tools.has(name)) throw new Error(`guardian did not register ${name}`);
 }
 for (const name of ["tool_call", "tool_result", "user_bash"]) {
@@ -112,10 +112,11 @@ mkdirSync(projectRoot, { recursive: true });
 writeFileSync(join(projectRoot, "package.json"), '{"scripts":{"test":"node -e \\"\\""}}\n');
 const statePath = join(projectRoot, ".engineering-harness", "workflows", "uncommitted", "state.json");
 const state = () => JSON.parse(readFileSync(statePath, "utf8"));
+const confirmations = [];
 const context = {
   cwd: projectRoot,
   hasUI: true,
-  ui: { confirm: async () => true, setWidget: () => {} },
+  ui: { confirm: async (title, message) => { confirmations.push([title, message]); return true; }, setWidget: () => {} },
 };
 const call = (name, params) => tools.get(name).execute("test", params, undefined, () => {}, context);
 const gitRoot = join(projectRoot, "..", "git-tool");
@@ -124,16 +125,59 @@ const gitResult = await tools.get("harness_git").execute("test", { args: ["init"
 assert.equal(gitResult.isError, undefined);
 
 await call("harness_begin_workflow", { workflowId: "uncommitted", title: "Uncommitted workflow", goal: "Advance without Git" });
-for (const topic of ["goal-and-users", "scope-and-non-goals", "domain-terms", "primary-scenarios", "boundaries-and-failures", "alternatives-and-tradeoffs", "acceptance-and-evidence", "rollout-and-verification"]) {
-  await call("harness_refine_requirement", {
-    workflowId: "uncommitted",
-    expectedRevision: state().revision,
-    topic,
-    question: `${topic} question`,
-    answer: `${topic} answer`,
-    factOrDecision: "decision",
-  });
-}
+await call("harness_update_question_backlog", {
+  workflowId: "uncommitted",
+  expectedRevision: state().revision,
+  questions: [{ id: "goal", question: "Who uses this?" }],
+});
+assert.match(buildWorkflowPrompt(discoverWorkflowContext(projectRoot)), /Who uses this\?/);
+await assert.rejects(
+  () => call("harness_confirm_understanding", { workflowId: "uncommitted", expectedRevision: state().revision }),
+  /Process every question/,
+);
+await call("harness_update_question_backlog", {
+  workflowId: "uncommitted",
+  expectedRevision: state().revision,
+  answeredQuestionId: "goal",
+  answer: "Harness users",
+  questions: [{ id: "scope", question: "What is in scope?" }],
+});
+await assert.equal(state().evidence.questionAnswers.length, 1);
+await assert.rejects(
+  () => call("harness_update_question_backlog", {
+    workflowId: "uncommitted", expectedRevision: state().revision, answeredQuestionId: "missing", answer: "no", questions: [],
+  }),
+  /not in the current backlog/,
+);
+await call("harness_update_question_backlog", {
+  workflowId: "uncommitted",
+  expectedRevision: state().revision,
+  answeredQuestionId: "scope",
+  answer: "Adaptive refinement",
+  questions: [],
+});
+assert.deepEqual(state().evidence.questionBacklog, []);
+await call("harness_begin_workflow", { workflowId: "legacy-refinement", title: "Legacy refinement", goal: "Initialize lazily" });
+const legacyStatePath = join(projectRoot, ".engineering-harness", "workflows", "legacy-refinement", "state.json");
+const legacyState = JSON.parse(readFileSync(legacyStatePath, "utf8"));
+legacyState.phase = "refinement";
+delete legacyState.evidence.questionBacklog;
+delete legacyState.evidence.questionAnswers;
+writeFileSync(legacyStatePath, `${JSON.stringify(legacyState)}\n`);
+await call("harness_update_question_backlog", {
+  workflowId: "legacy-refinement",
+  expectedRevision: legacyState.revision,
+  questions: [{ id: "legacy", question: "What remains?" }],
+});
+assert.deepEqual(JSON.parse(readFileSync(legacyStatePath, "utf8")).evidence.questionBacklog, [{ id: "legacy", question: "What remains?" }]);
+await call("harness_begin_workflow", { workflowId: "reopened-refinement", title: "Reopened refinement", goal: "Initialize after reopening" });
+await call("harness_reopen_workflow", { workflowId: "reopened-refinement", expectedRevision: 0, reason: "Exercise legacy backlog initialization" });
+await call("harness_update_question_backlog", {
+  workflowId: "reopened-refinement",
+  expectedRevision: 1,
+  questions: [{ id: "reopened", question: "What changed?" }],
+});
+assert.deepEqual(JSON.parse(readFileSync(join(projectRoot, ".engineering-harness", "workflows", "reopened-refinement", "state.json"), "utf8")).evidence.questionBacklog, [{ id: "reopened", question: "What changed?" }]);
 await call("harness_confirm_understanding", { workflowId: "uncommitted", expectedRevision: state().revision });
 const manifest = {
   schemaVersion: 2,
@@ -160,7 +204,13 @@ await assert.rejects(
   () => call("harness_start_work_unit", { workflowId: "uncommitted", workUnitId: "unit", expectedRevision: state().revision }),
   /Execution has not been approved/,
 );
+confirmations.length = 0;
 await call("harness_request_approval", { workflowId: "uncommitted", expectedRevision: state().revision });
+assert.equal(confirmations.length, 1);
+assert.equal(confirmations[0][0], "Approve workflow");
+assert.match(readFileSync(join(root, "resources", "AGENTS.md"), "utf8"), /call the approval tool directly/);
+assert.match(readFileSync(join(root, "resources", "AGENTS.md"), "utf8"), /cannot block arbitrary natural-language output/);
+assert.match(readFileSync(join(process.env.ROOT, "docs", "adr", "0001-persist-the-requirements-question-backlog-explicitly.md"), "utf8"), /cannot technically block an unregistered question/);
 await call("harness_start_work_unit", { workflowId: "uncommitted", workUnitId: "unit", expectedRevision: state().revision });
 await assert.rejects(
   () => call("harness_record_verification", { workflowId: "uncommitted", expectedRevision: state().revision }),
@@ -195,7 +245,7 @@ await call("harness_complete_work_unit", { workflowId: "uncommitted", workUnitId
 const verification = await call("harness_record_verification", { workflowId: "uncommitted", expectedRevision: state().revision });
 assert.equal("projectRevision" in verification.details.receipt, false);
 assert.equal(state().phase, "completed");
-assert.deepEqual(discoverWorkflowContext(projectRoot).workflows.map((workflow) => workflow.id), ["uncommitted"]);
+assert.deepEqual(discoverWorkflowContext(projectRoot).workflows.map((workflow) => workflow.id), ["legacy-refinement", "reopened-refinement", "uncommitted"]);
 EOF
 
 NODE_PATH="$ROOT" node --input-type=module <<'EOF'

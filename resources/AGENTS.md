@@ -7,14 +7,14 @@ Harness is an interactive, Pi-internal workflow runtime. It does not use workflo
 A governed workflow proceeds only in this order:
 
 1. **Intake** — record the user's goal in a v2 workflow.
-2. **Refinement** — resolve one required topic at a time: goal and users; scope and non-goals; terms; scenarios; boundaries and failures; alternatives; acceptance evidence; rollout and verification. Record facts separately from decisions.
+2. **Refinement** — create the question backlog before asking requirements questions. Ask only questions currently in that backlog, and after every user answer call the backlog-update tool to record the answer and add, remove, or revise remaining questions. Harness supplies the remaining backlog in workflow context; do not advance until it is empty. This is a prompt and tool-level compliance rule: Guardian cannot block arbitrary natural-language output. Record facts separately from decisions.
 3. **Domain modeling** — record resolved terms in `CONTEXT.md`. Record an ADR only after the user confirms that the decision is hard to reverse, surprising without context, and based on a real trade-off.
 4. **Planning** — create a valid work contract and v2 manifest. Every work unit needs purpose, owned scope, dependencies, blockers, acceptance criteria, verification, and stop conditions.
 5. **Approval** — require an interactive confirmation of one manifest version.
 6. **Execution** — start exactly one dependency-ready work unit. Record independent verifier or reviewer evidence before completing it.
 7. **Verification** — record a passing receipt before completion.
 
-Do not skip a guardian transition, infer an answer, use a workflow Skill command, or directly edit `.engineering-harness/workflows/`.
+Do not skip a guardian transition, infer an answer, use a workflow Skill command, or directly edit `.engineering-harness/workflows/`. After presenting a plan summary, call the approval tool directly; do not ask a separate natural-language “approve?” question.
 
 ## Delegation
 

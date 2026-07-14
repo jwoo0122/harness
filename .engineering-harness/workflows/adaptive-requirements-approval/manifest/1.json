@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 2,
+  "workflowId": "adaptive-requirements-approval",
+  "version": 1,
+  "title": "적응형 요구사항 질문과 직접 승인 요청",
+  "goal": "고정된 요구사항 정제 질문 순회를 에이전트가 동적으로 관리하는 질문 목록으로 대체하고, 요약 뒤 별도 승인 질문 없이 승인 도구를 직접 호출하도록 한다.",
+  "acceptanceCriteria": [
+    {
+      "id": "requirements-understood",
+      "description": "The user confirmed the shared understanding."
+    }
+  ],
+  "workUnits": [
+    {
+      "id": "plan-work",
+      "title": "Create an approved plan",
+      "purpose": "Convert the clarified requirement into an executable plan.",
+      "ownedScope": [],
+      "dependsOn": [],
+      "blockers": [],
+      "acceptanceCriteria": [
+        "requirements-understood"
+      ],
+      "verification": [
+        "Validate the plan structurally."
+      ],
+      "stopConditions": [
+        "Stop when a material ambiguity remains."
+      ]
+    }
+  ],
+  "relationships": []
+}

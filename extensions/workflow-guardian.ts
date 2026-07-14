@@ -5,14 +5,13 @@ import { Type } from "typebox";
 import { createLocalBashOperations, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   ARTIFACT_ROOT,
-  REFINEMENT_TOPICS,
   allowedRoles,
   buildWorkList,
   canEnterExecution,
   canEnterPlanning,
   dependenciesComplete,
+  hasUnresolvedQuestions,
   isV2Manifest,
-  nextRefinementTopic,
   readLiveV2Workflow,
   workflowArtifactPath,
 } from "../lib/workflow-protocol.js";
@@ -90,7 +89,7 @@ function initialState(workflowId: string, manifestVersion: number, units: Array<
     manifestVersion,
     revision: 0,
     phase: "intake",
-    evidence: { refinement: {}, terms: [], adrs: [], sharedUnderstanding: false, approval: false },
+    evidence: { questionBacklog: undefined, questionAnswers: [], terms: [], adrs: [], sharedUnderstanding: false, approval: false },
     delegations: [],
     workUnits: Object.fromEntries(units.map((unit) => [unit.id, { status: "pending" }])),
     updatedAt: now(),
@@ -235,24 +234,48 @@ export default function workflowGuardian(pi: ExtensionAPI) {
   });
 
   pi.registerTool({
-    name: "harness_refine_requirement",
-    label: "Refine Requirement",
-    description: "Record exactly one ordered requirements-refinement answer and return the next required topic.",
-    parameters: Type.Object({ workflowId: Type.String(), expectedRevision: Type.Integer(), topic: Type.String(), question: Type.String(), answer: Type.String(), factOrDecision: Type.Union([Type.Literal("fact"), Type.Literal("decision")]) }),
+    name: "harness_update_question_backlog",
+    label: "Update Question Backlog",
+    description: "Create or revise the remaining requirements questions after processing one user answer.",
+    parameters: Type.Object({
+      workflowId: Type.String(),
+      expectedRevision: Type.Integer(),
+      questions: Type.Array(Type.Object({ id: Type.String(), question: Type.String() })),
+      answeredQuestionId: Type.Optional(Type.String()),
+      answer: Type.Optional(Type.String()),
+    }),
     async execute(_id, params, _signal, _update, ctx) {
       const workflow = stateFor(ctx.cwd, params.workflowId);
-      const expectedTopic = nextRefinementTopic(workflow.state);
-      if (workflow.state.phase === "intake" && params.topic === REFINEMENT_TOPICS[0]) {
-        writeState(workflow, params.expectedRevision, (state) => { state.phase = "refinement"; state.evidence.refinement[params.topic] = { question: params.question, answer: params.answer, kind: params.factOrDecision }; });
+      const ids = new Set<string>();
+      if (params.questions.some((question) => !question.id.trim() || !question.question.trim() || ids.has(question.id) || !(ids.add(question.id), true))) {
+        throw new Error("Each remaining question needs a unique, non-empty id and text.");
+      }
+      const backlog = workflow.state.evidence.questionBacklog;
+      if (!Array.isArray(backlog)) {
+        if (!(["intake", "refinement"] as const).includes(workflow.state.phase) || params.answeredQuestionId || params.answer) throw new Error("Create the question backlog before recording an answer.");
+        writeState(workflow, params.expectedRevision, (state) => {
+          state.phase = "refinement";
+          state.evidence.questionBacklog = params.questions;
+          state.evidence.questionAnswers = [];
+        });
       } else {
-        if (workflow.state.phase !== "refinement" || expectedTopic !== params.topic) throw new Error(`Expected refinement topic: ${expectedTopic ?? "shared understanding confirmation"}.`);
-        writeState(workflow, params.expectedRevision, (state) => { state.evidence.refinement[params.topic] = { question: params.question, answer: params.answer, kind: params.factOrDecision }; });
+        if (workflow.state.phase !== "refinement" || !params.answeredQuestionId || !params.answer?.trim()) {
+          throw new Error("Record one answered backlog question before revising the remaining questions.");
+        }
+        const answered = backlog.find((question: any) => question.id === params.answeredQuestionId);
+        if (!answered) throw new Error("The answered question is not in the current backlog.");
+        writeState(workflow, params.expectedRevision, (state) => {
+          state.evidence.questionBacklog = params.questions;
+          state.evidence.questionAnswers.push({ id: answered.id, question: answered.question, answer: params.answer, recordedAt: now() });
+        });
       }
       selectedWorkflowId = params.workflowId;
       const updated = stateFor(ctx.cwd, params.workflowId);
       refresh(ctx);
-      const next = nextRefinementTopic(updated.state);
-      return { content: [{ type: "text", text: next ? `Next required topic: ${next}. Ask exactly one question with a recommended answer before recording it.` : "All required topics are recorded. Obtain explicit shared-understanding confirmation next." }], details: { nextTopic: next } };
+      const remaining = updated.state.evidence.questionBacklog;
+      return { content: [{ type: "text", text: remaining.length
+        ? `Question backlog updated. Remaining questions for the agent: ${remaining.map((question: any) => `[${question.id}] ${question.question}`).join("; ")}`
+        : "Question backlog is empty. Summarize the requirements and obtain shared-understanding confirmation before planning." }], details: { questions: remaining } };
     },
   });
 
@@ -264,7 +287,7 @@ export default function workflowGuardian(pi: ExtensionAPI) {
     async execute(_id, params, _signal, _update, ctx) {
       if (!ctx.hasUI) throw new Error("Shared-understanding confirmation requires an interactive UI.");
       const workflow = stateFor(ctx.cwd, params.workflowId);
-      if (nextRefinementTopic(workflow.state)) throw new Error("Complete every required refinement topic first.");
+      if (hasUnresolvedQuestions(workflow.state)) throw new Error("Process every question in the question backlog first.");
       const confirmed = await ctx.ui.confirm("Confirm shared understanding", "Requirements, terms, decisions, acceptance criteria, evidence, and rejected alternatives are complete.");
       if (!confirmed) throw new Error("The user did not confirm shared understanding.");
       writeState(workflow, params.expectedRevision, (state) => { state.evidence.sharedUnderstanding = true; state.phase = "planning"; });
