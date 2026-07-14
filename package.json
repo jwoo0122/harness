@@ -1,6 +1,6 @@
 {
   "name": "@jwoo0122/harness",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "description": "Standalone Harness CLI with bundled Pi runtime and bounded subagents",
   "type": "module",
   "license": "MIT",

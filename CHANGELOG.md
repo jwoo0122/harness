@@ -1,3 +1,10 @@
+## [2.2.1](https://github.com/jwoo0122/harness/compare/v2.2.0...v2.2.1) (2026-07-14)
+
+
+### Bug Fixes
+
+* **guardian:** decouple workflow transitions from git ([#11](https://github.com/jwoo0122/harness/issues/11)) ([b91d180](https://github.com/jwoo0122/harness/commit/b91d180a170765b726d8766d595e9521dbf93f2b))
+
 # [2.2.0](https://github.com/jwoo0122/harness/compare/v2.1.0...v2.2.0) (2026-07-12)
 
 
