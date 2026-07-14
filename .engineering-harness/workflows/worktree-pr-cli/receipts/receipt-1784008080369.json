@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "id": "receipt-1784008080369",
+  "workflowId": "worktree-pr-cli",
+  "manifestVersion": 2,
+  "result": "passed",
+  "verifiedBy": "harness-guardian",
+  "verifiedAt": "2026-07-14T05:48:00Z",
+  "acceptanceCriteria": [
+    {
+      "id": "cli-worktree-mode",
+      "result": "passed",
+      "evidence": "npm test exited 0 under Harness guardian verification."
+    },
+    {
+      "id": "isolated-workspace-lifecycle",
+      "result": "passed",
+      "evidence": "npm test exited 0 under Harness guardian verification."
+    },
+    {
+      "id": "write-and-commit-boundary",
+      "result": "passed",
+      "evidence": "npm test exited 0 under Harness guardian verification."
+    },
+    {
+      "id": "completion-pr-contract",
+      "result": "passed",
+      "evidence": "npm test exited 0 under Harness guardian verification."
+    },
+    {
+      "id": "regression-evidence",
+      "result": "passed",
+      "evidence": "npm test exited 0 under Harness guardian verification."
+    }
+  ],
+  "commands": [
+    {
+      "command": "npm test",
+      "exitCode": 0,
+      "result": "ring-harness-bootstrap-test.t656vP/home/.codex/agents/explorer.toml\nInstalled /var/folders/gw/rpp48ktx1_lgb59p5t30g1fr0000gn/T//engineering-harness-bootstrap-test.t656vP/home/.codex/agents/implementer.toml\nInstalled /var/folders/gw/rpp48ktx1_lgb59p5t30g1fr0000gn/T//engineering-harness-bootstrap-test.t656vP/home/.codex/agents/requirements-analyst.toml\nInstalled /var/folders/gw/rpp48ktx1_lgb59p5t30g1fr0000gn/T//engineering-harness-bootstrap-test.t656vP/home/.codex/agents/reviewer.toml\nInstalled /var/folders/gw/rpp48ktx1_lgb59p5t30g1fr0000gn/T//engineering-harness-bootstrap-test.t656vP/home/.codex/agents/verifier.toml\nInstalled managed guidance in /var/folders/gw/rpp48ktx1_lgb59p5t30g1fr0000gn/T//engineering-harness-bootstrap-test.t656vP/home/.pi/agent/AGENTS.md\nInstalled /var/folders/gw/rpp48ktx1_lgb59p5t30g1fr0000gn/T//engineering-harness-bootstrap-test.t656vP/home/.pi/agent/agents/architect.md\nInstalled /var/folders/gw/rpp48ktx1_lgb59p5t30g1fr0000gn/T//engineering-harness-bootstrap-test.t656vP/home/.pi/agent/agents/explorer.md\nInstalled /var/folders/gw/rpp48ktx1_lgb59p5t30g1fr0000gn/T//engineering-harness-bootstrap-test.t656vP/home/.pi/agent/agents/implementer.md\nInstalled /var/folders/gw/rpp48ktx1_lgb59p5t30g1fr0000gn/T//engineering-harness-bootstrap-test.t656vP/home/.pi/agent/agents/requirements-analyst.md\nInstalled /var/folders/gw/rpp48ktx1_lgb59p5t30g1fr0000gn/T//engineering-harness-bootstrap-test.t656vP/home/.pi/agent/agents/reviewer.md\nInstalled /var/folders/gw/rpp48ktx1_lgb59p5t30g1fr0000gn/T//engineering-harness-bootstrap-test.t656vP/home/.pi/agent/agents/verifier.md\nEngineering harness is installed and current.\nCodex: Use $engineering-lead to lead and verify this work.\nStandalone CLI: npm install -g --ignore-scripts @jwoo0122/harness, then run hrn.\nThe CLI bundles its Pi runtime and subagent extension; no separate pi installation is required.\nInstaller acceptance test passed.\nStandalone CLI acceptance test passed.\nRelease automation acceptance test passed.\n"
+    }
+  ],
+  "remainingRisks": [
+    "Pi-internal enforcement does not prevent deliberate changes outside hrn."
+  ]
+}

@@ -1,0 +1,236 @@
+{
+  "schemaVersion": 2,
+  "workflowId": "worktree-pr-cli",
+  "manifestVersion": 2,
+  "revision": 53,
+  "phase": "completed",
+  "evidence": {
+    "questionAnswers": [
+      {
+        "id": "cli-flag",
+        "question": "`--worktree`는 어떤 CLI 형태를 지원해야 하나요? 예를 들어 기본 true인 `--worktree`와 비활성화용 `--no-worktree`를 제공할지, 기존 명령에서 옵션을 허용할 범위를 정해 주세요.",
+        "answer": "`--worktree`는 boolean 값을 받으며 기본값은 true로 한다. `--worktree false`로 비활성화할 수 있다. 비활성화 시 Harness는 worktree 경계 검사를 하지 않고 PR 생성도 강제하지 않는다.",
+        "recordedAt": "2026-07-14T03:42:15Z"
+      },
+      {
+        "id": "worktree-lifecycle",
+        "question": "`.hrn` 아래 worktree와 브랜치의 이름·생성 기준·재개 동작·충돌/기존 디렉토리 처리·작업 완료 후 보존 또는 삭제 정책은 어떻게 해야 하나요?",
+        "answer": "worktree 생성 시점에는 랜덤 이름을 사용해도 된다. 브랜치 이름은 hrn 진입 후 사용자의 첫 요청 내용에 따라 적절히 사후 결정한다. `.hrn`은 `.gitignore` 대상이어야 한다.",
+        "recordedAt": "2026-07-14T03:43:16Z"
+      },
+      {
+        "id": "worktree-lifecycle-resume",
+        "question": "생성된 worktree를 workflow 재개 시 어떻게 찾아 연결하나요? 기존 worktree/브랜치가 있으면 재사용할지, 충돌 시 실패할지, workflow 식별자 기반 메타데이터를 둘지 정해 주세요.",
+        "answer": "재개 시 대응되는 worktree를 가능한 재사용한다. 대응되는 worktree가 없으면 새로 만든다. workflow 정보에는 worktree 정보를 저장하지 않고, `.hrn` 내부의 manifest/map 같은 별도 매핑으로 worktree와 workflow의 연결관계를 관리한다.",
+        "recordedAt": "2026-07-14T03:44:39Z"
+      },
+      {
+        "id": "worktree-map-recovery",
+        "question": "`.hrn` 매핑 파일의 workflow 식별자·worktree 경로·브랜치·상태 기록과 검증 규칙은 어떻게 정할까요? 매핑이 없거나 stale/손상되었을 때는 Git worktree 목록을 보완 검색해 재연결할지, 안전하게 새로 만들지 정해 주세요.",
+        "answer": "매핑이 없거나 stale/손상된 경우에는 기존 worktree를 추측해 재연결하지 않고 안전하게 새 worktree를 만든다. 매핑 저장 형식은 요구사항에 맞춰 구현자가 적절히 선택한다.",
+        "recordedAt": "2026-07-14T03:45:28Z"
+      },
+      {
+        "id": "worktree-cleanup",
+        "question": "workflow 완료 및 PR 생성 후 `.hrn` worktree와 로컬 브랜치는 보존하나요, 자동 삭제하나요? PR 생성 실패 시에는 어떻게 해야 하나요?",
+        "answer": "완료 후 로컬 브랜치와 `.hrn` worktree는 보존한다. PR 생성 실패 시 최대 3회까지 재시도하고, 모두 실패하면 사용자에게 보고한 뒤 complete로 전이한다.",
+        "recordedAt": "2026-07-14T03:46:09Z"
+      },
+      {
+        "id": "branch-remote",
+        "question": "worktree 브랜치는 어떤 기준 브랜치에서 만들고 어떤 이름 규칙으로 원격에 push해야 하나요? 원격 이름과 이미 존재하는 브랜치 처리도 정해 주세요.",
+        "answer": "worktree 브랜치는 `main`에서 만든다. 이름은 적절한 `hrn/*` 규칙을 사용한다. 이미 존재하는 브랜치임이 확인되면 언제든 다른 이름으로 변경한다.",
+        "recordedAt": "2026-07-14T03:47:08Z"
+      },
+      {
+        "id": "branch-remote-details",
+        "question": "원격은 항상 `origin`을 사용할까요, 아니면 upstream/기본 push remote를 감지할까요? 원격 브랜치 충돌 시 새 이름을 정하는 방식(랜덤 suffix 등)과 이미 push한 뒤 이름을 바꿔야 하는 경우의 처리도 정해 주세요.",
+        "answer": "원격은 `origin`을 사용한다. 원격 브랜치 충돌 시 새 이름 선정 방식은 구현자가 적절히 정한다. 이미 push한 브랜치의 이름 변경은 고려하지 않는다.",
+        "recordedAt": "2026-07-14T03:47:55Z"
+      },
+      {
+        "id": "pr-contract",
+        "question": "완료 시 PR은 어떤 provider/CLI/API와 base 브랜치를 사용하고, 제목·본문·draft 여부·라벨을 어떻게 정하며, push 또는 PR 생성 실패 시 complete 전이를 어떻게 처리해야 하나요?",
+        "answer": "PR은 `gh` CLI로 생성한다. 제목과 본문은 현재 요구사항에 맞게 적절히 정한다. draft·라벨 등은 프로젝트 가이드가 있으면 이를 따르도록 에이전트에 전달한다. push 또는 PR 생성에 실패하면 최대 3회 재시도한 뒤 complete로 전이하고, PR 생성에 실패했음을 사용자에게 보고한다.",
+        "recordedAt": "2026-07-14T03:49:21Z"
+      },
+      {
+        "id": "completion-scope",
+        "question": "PR 생성 조건인 ‘모든 workflow의 작업이 끝난 상태’는 해당 workflow의 모든 work unit과 verification만 완료된 상태를 의미하나요, 아니면 연결된/하위 workflow까지 포함하나요?",
+        "answer": "현재 workflow 모델에는 연결/하위 workflow 개념을 전제하지 않는다. PR 생성 조건의 범위는 현재 workflow로 한정한다.",
+        "recordedAt": "2026-07-14T03:49:52Z"
+      },
+      {
+        "id": "completion-gate",
+        "question": "현재 workflow 범위에서 PR 생성은 모든 work unit이 completed이고 요구된 verification receipt까지 기록된 뒤에만 시도하면 될까요? PR 생성이 3회 실패해 complete로 넘어간 경우에는 PR 실패를 별도 완료 증거/상태로 남겨야 하는지도 정해 주세요.",
+        "answer": "현재 workflow의 모든 work unit이 completed이고 요구된 verification receipt가 기록된 뒤에만 PR 생성을 시도한다. 3회 실패 후 complete로 전이하는 경우에도 PR 실패 내용은 별도 완료 증거/상태로 보존한다.",
+        "recordedAt": "2026-07-14T03:50:10Z"
+      },
+      {
+        "id": "write-boundary",
+        "question": "현재 workflow의 worktree 밖 수정 거부는 파일 쓰기·삭제·이동과 git 조작까지 포함하나요? 읽기는 허용하되 경로 탈출(`..`), 심볼릭 링크, 프로세스 cwd 변경 같은 우회도 차단해야 하나요?",
+        "answer": "읽기는 허용한다. 현재 worktree 밖 파일에 대한 명시적·직접적 수정, 삭제, 이동 시도는 거부한다. 심볼릭 링크·cwd 변경·경로 탈출 자체는 거부하지 않는다.",
+        "recordedAt": "2026-07-14T03:51:28Z"
+      },
+      {
+        "id": "git-boundary",
+        "question": "Git 조작은 어떻게 처리할까요? 예를 들어 worktree 밖을 대상으로 하는 `git -C <outside>`, 다른 worktree의 index/branch에 영향을 주는 명령은 거부할지, 현재 worktree에서 실행한 Git 명령은 허용할지 정해 주세요.",
+        "answer": "worktree 밖을 대상으로 하는 `git -C <outside>` 및 다른 worktree의 index/branch에 영향을 주는 Git 명령은 거부한다. 현재 worktree에서 실행한 Git 명령은 허용한다.",
+        "recordedAt": "2026-07-14T03:51:40Z"
+      },
+      {
+        "id": "no-worktree-mode",
+        "question": "`--worktree false`에서는 기존처럼 현재 디렉토리에서 작업하게 할지, PR 자동 생성과 경로 검사를 어떻게 적용할지 정해 주세요.",
+        "answer": "`--worktree false`에서는 기존처럼 현재 디렉토리에서 작업하며, worktree 경계 검사와 PR 자동 생성을 모두 적용하지 않는다.",
+        "recordedAt": "2026-07-14T03:51:52Z"
+      }
+    ],
+    "terms": [
+      {
+        "term": "worktree mode",
+        "definition": "`hrn --worktree`의 boolean 실행 모드다. 기본값은 true이며 true일 때 workflow별 `.hrn` worktree 격리·쓰기/Git 경계 검사·완료 PR 절차가 적용된다. false일 때는 현재 디렉터리를 사용하고 이 절차들을 적용하지 않는다.",
+        "recordedAt": "2026-07-14T03:55:44Z"
+      },
+      {
+        "term": "workflow worktree mapping",
+        "definition": "`.hrn` 아래에 보존되는 workflow와 전용 worktree·브랜치의 외부 연결 기록이다. 재개 시 유효한 연결은 재사용하고, 없거나 stale 또는 손상된 연결은 추측해 복구하지 않고 새 worktree를 만든다.",
+        "recordedAt": "2026-07-14T03:55:48Z"
+      },
+      {
+        "term": "completion PR attempt",
+        "definition": "worktree mode에서 현재 workflow의 모든 work unit과 verification receipt가 완료된 뒤, Harness가 origin에 push하고 `gh` CLI로 PR 생성을 최대 3회 시도하는 완료 절차다. 3회 실패해도 실패 증거와 사용자 보고 후 complete로 전이한다.",
+        "recordedAt": "2026-07-14T03:55:51Z"
+      }
+    ],
+    "adrs": [],
+    "sharedUnderstanding": true,
+    "approval": true,
+    "questionBacklog": [],
+    "reopened": {
+      "reason": "The user added two material requirements after the initial summary: reject commits unless `.hrn` is ignored and instruct agents accordingly; have Harness request PR metadata from the agent while the agent follows project guidance.",
+      "at": "2026-07-14T03:54:55Z",
+      "invalidatedManifestVersion": 1
+    },
+    "planProposed": 2,
+    "verification": {
+      "receipt": ".engineering-harness/workflows/worktree-pr-cli/receipts/receipt-1784008080369.json",
+      "recordedAt": "2026-07-14T05:48:00Z"
+    }
+  },
+  "delegations": [
+    {
+      "id": "delegation-20",
+      "role": "explorer",
+      "workUnitId": "plan-work",
+      "task": "[[harness-delegation:delegation-20]]\nRole: explorer\nPurpose: 현재 hrn CLI, Guardian 경계, workflow 완료 전이, Git/PR 통합 지점과 테스트 구조를 읽기 전용으로 조사하여 구현 작업 단위와 검증 범위를 정한다.\nInputs: 확정 요구사항: 기본 true의 --worktree boolean, .hrn worktree/map/ignore/commit guard, 외부 쓰기·Git 거부, gh PR 완료 절차와 실패 3회 처리.\nRead-only dependencies: 현재 저장소 소스·테스트·문서·package 설정과 기존 workflow runtime 구현.\nProhibited scope: 파일 수정, Git 상태 변경, workflow artifact 변경, 구현 또는 테스트 실행 결과를 성공 증거로 주장하는 행위.\nVerification: 관련 파일 경로·현재 동작·영향받는 API/테스트·위험 및 작업 분할을 인용한 조사 보고서.\nStop conditions: 관련 CLI/Guardian/launcher/completion/PR 코드와 테스트 위치를 찾으면 중단하고, 불확실성은 명시한다.\nReturn status, evidence, files changed, verification performed, assumptions, remaining risks, and unresolved issues.",
+      "status": "reserved",
+      "createdAt": "2026-07-14T03:55:59Z"
+    },
+    {
+      "id": "delegation-24",
+      "role": "implementer",
+      "workUnitId": "workspace-runtime",
+      "task": "[[harness-delegation:delegation-24]]\nRole: implementer\nPurpose: Implement the approved workspace-runtime work unit: CLI --worktree boolean and a reusable .hrn worktree mapping lifecycle, including .gitignore and focused tests, without Guardian/PR behavior beyond interfaces needed by the manager.\nInputs: Manifest v2 workspace-runtime contract; use main as base, random initial worktree/branch names, map external to workflow artifacts, safe reuse only for validated mapping, first workflow request will later rename branch.\nRead-only dependencies: AGENTS.md, current launcher/protocol/context code, Guardian interfaces only to establish minimal manager API, and existing standalone tests.\nProhibited scope: Do not edit extensions/workflow-guardian.ts, resources/AGENTS.md, .pi/agents, PR completion flow, workflow artifacts, release config, or unrelated user changes. Do not commit/push/publish.\nVerification: Add and run focused tests for option parsing, disabled bypass, worktree creation/reuse, and stale/malformed mapping behavior; report commands and results.\nStop conditions: Stop and report if a required Guardian integration cannot be expressed as a narrow manager API, Git main does not exist in fixtures, or implementation requires a workflow artifact schema change.\nReturn status, evidence, files changed, verification performed, assumptions, remaining risks, and unresolved issues.",
+      "status": "rejected",
+      "createdAt": "2026-07-14T03:59:14Z",
+      "reportedAt": "2026-07-14T04:00:17Z",
+      "isError": false,
+      "parentEvidence": "The authorized implementer was blocked before inspection or mutation because its isolated session lacked an active selected workflow/work unit; it changed no files and produced no implementation evidence. The result is rejected."
+    },
+    {
+      "id": "delegation-27",
+      "role": "reviewer",
+      "workUnitId": "workspace-runtime",
+      "task": "[[harness-delegation:delegation-27]]\nRole: reviewer\nPurpose: Independently review the workspace-runtime change using the supplied implementation summary and actual test evidence, without modifying files.\nInputs: Changed files: .gitignore adds `.hrn/`; lib/worktree-manager.js adds strict --worktree true|false parsing, map validation/atomic write, main-based random `hrn/session-*` worktree creation, map reuse only when path/Git root/branch match, stale/malformed map replacement, workflow attachment/branch rename helpers, and environment serialization; lib/launcher.js strips --worktree before forwarding to Pi, defaults enabled, creates/chdirs to the mapped workspace, bypasses setup for help/version/update/pi-help and inherited false child mode; README documents behavior; standalone test creates a main repo, exercises parsing, creation/reuse, map record, and malformed replacement. Parent ran `node --check lib/launcher.js && node --check lib/worktree-manager.js` successfully and `./tests/test-standalone-cli.sh` successfully. Review only the supplied details because the child runtime currently blocks its read tools before a selected workflow exists; identify correctness, security, requirement, and test-coverage issues or explicitly accept with residual risks.\nRead-only dependencies: The supplied summary, approved workspace-runtime contract, and reported command outcomes.\nProhibited scope: Do not use tools, modify files, run commands, create commits, or assess Guardian/PR changes reserved for later work units.\nVerification: Return an independent code-review assessment that states whether the described change meets the workspace-runtime contract and identifies concrete defects or residual risks.\nStop conditions: Stop after reviewing the supplied material; if it is insufficient to establish a conclusion, report that limitation rather than assuming unstated behavior.\nReturn status, evidence, files changed, verification performed, assumptions, remaining risks, and unresolved issues.",
+      "status": "rejected",
+      "createdAt": "2026-07-14T04:05:23Z",
+      "reportedAt": "2026-07-14T04:10:04Z",
+      "isError": false,
+      "parentEvidence": "Independent reviewer could not accept the summary-only review. It identified missing evidence for workflow-specific attachment/reuse, launcher behavior, and map concurrency/path safety. The current unit remains active while these actionable runtime and test gaps are addressed; Guardian boundary work remains deferred as planned."
+    },
+    {
+      "id": "delegation-30",
+      "role": "reviewer",
+      "workUnitId": "workspace-runtime",
+      "task": "[[harness-delegation:delegation-30]]\nRole: reviewer\nPurpose: Independently review the final workspace-runtime implementation from the supplied source excerpt and test assertions, without tools or modifications.\nInputs: Review the following exact manager behavior: parseWorktreeOption defaults true; accepts only `--worktree true|false` or `--worktree=true|false`; strips the flag. Map schema is `{schemaVersion:1,worktrees:[{id:<16 hex>,path:`.hrn/worktrees/${id}`,branch:`hrn/*`,workflowId:null|string}]}`; invalid JSON/schema/path/duplicate IDs are invalid. Map writes use same-directory temp+rename and `worktrees.json.lock` acquired with exclusive create. Mapping validation rejects symlinked workspace paths and requires `git rev-parse --show-toplevel` to exactly equal the mapped worktree and current branch to exactly equal mapped branch. `prepareWorkspace`: if cwd lies in a valid mapped workspace it returns it; otherwise resolves the current Git root, requires local refs/heads/main, under map lock makes `.hrn/worktrees/<random16hex>` with `git worktree add --no-checkout -b hrn/session-<random8> <path> main`, checks out, and writes the mapping after retaining only valid existing entries. `attachWorkspaceToWorkflow`: under the same lock, validates the mapped workspace, rejects a different existing workflow ID, allocates a collision-checked `hrn/<ASCII slug of first request>-<random8>` local/origin branch, runs `git branch -m`, stores workflowId and renamed branch in the external map. `workspaceForWorkflow` canonicalizes the Git root and returns only a valid matching entry. `workspaceEnvironment` passes enabled/root/path/id through the launcher; `workspaceFromEnvironment` validates against map. Launcher parses before Pi setup; metadata commands return early; non-help default calls prepareWorkspace, exports environment and chdirs to it; false and inherited false export disabled; `--pi-help` bypasses workspace creation; the worktree flag is not forwarded to Pi. `.gitignore` contains `.hrn/` and README documents resume from worktree and false behavior. Test assertions construct a local main repo, prove default/false/equals parsing and invalid rejection, create a worktree, prove valid nested-cwd reuse, attach `first-workflow` using `Add workspace isolation` and assert `hrn/add-workspace-isolation-*` plus lookup by workflow, then corrupt the map and assert new workspace ID. Actual commands passed: `node --check lib/worktree-manager.js && ./tests/test-standalone-cli.sh`. Assess only workspace-runtime criteria; do not require Guardian boundary/PR work.\nRead-only dependencies: The supplied exact implementation behavior, test assertions, workspace-runtime manifest criteria, and reported passing command.\nProhibited scope: Do not call tools, modify files, run commands, commit, or assess later Guardian/PR work units.\nVerification: Return an independent review verdict with concrete findings and whether the supplied implementation meets the workspace-runtime acceptance scope.\nStop conditions: Stop after static review of supplied material; clearly distinguish residual risks from confirmed defects.\nReturn status, evidence, files changed, verification performed, assumptions, remaining risks, and unresolved issues.",
+      "status": "rejected",
+      "createdAt": "2026-07-14T04:12:46Z",
+      "reportedAt": "2026-07-14T04:21:19Z",
+      "isError": false,
+      "parentEvidence": "Independent review rejected the unit due to a confirmed workspace-provenance gap: path/branch validation alone could reuse an unrelated repository at the mapped path. The parent will add Git common-directory membership validation and regression coverage before seeking a new review. Stale-lock/orphan cleanup remain documented residual risks because the requirement calls for safe new creation and preservation, not automatic cleanup."
+    },
+    {
+      "id": "delegation-33",
+      "role": "reviewer",
+      "workUnitId": "workspace-runtime",
+      "task": "[[harness-delegation:delegation-33]]\nRole: reviewer\nPurpose: Independently re-review the workspace-runtime implementation after the provenance fix and added regression assertion.\nInputs: Previous static review found that a path/branch-matching unrelated repository could be reused. The implementation now adds `gitCommonDirectory(cwd)`, derived by `git rev-parse --git-common-dir` and resolved against cwd; mapped workspace validity requires all of: exact mapped top-level, exact mapped branch, non-symlink path, and equal Git common directories between mapped workspace and mapping project root. The standalone test now removes the real mapped worktree, initializes an unrelated repository at the same mapped path with the expected branch name, asserts `workspaceForWorkflow(projectRoot, workflowId) === undefined`, then corrupts the map and verifies safe replacement. Existing coverage remains: strict default/true/false parsing; main-based create; nested cwd reuse; first-request attach/rename/map lookup; malformed map recreation. `.hrn/` is ignored. `node --check lib/worktree-manager.js && ./tests/test-standalone-cli.sh` passed after the change. Review whether the critical provenance defect is closed and whether the workspace-runtime scope is acceptable; Guardian file boundaries and PR work remain intentionally deferred.\nRead-only dependencies: The supplied implementation/test delta, the workspace-runtime contract, and reported check result.\nProhibited scope: Do not call tools, modify files, run commands, commit, or evaluate later Guardian/PR work.\nVerification: Return an independent review verdict, citing any remaining confirmed defect or accepting the workspace-runtime unit with explicit residual risks.\nStop conditions: Stop after the static review; do not reject merely because final workflow verification receipts are not created until the later verification phase.\nReturn status, evidence, files changed, verification performed, assumptions, remaining risks, and unresolved issues.",
+      "status": "accepted",
+      "createdAt": "2026-07-14T04:22:24Z",
+      "reportedAt": "2026-07-14T04:24:26Z",
+      "isError": false,
+      "parentEvidence": "Independent reviewer accepted the workspace-runtime unit. It found the Git common-directory validation closes unrelated-repository reuse; the standalone test exercises that replacement scenario. It reported residual non-blocking risks around symlink aliases/concurrency and confirmed Guardian boundaries and PR creation are correctly deferred."
+    },
+    {
+      "id": "delegation-38",
+      "role": "reviewer",
+      "workUnitId": "guardian-boundaries-and-completion",
+      "task": "[[harness-delegation:delegation-38]]\nRole: reviewer\nPurpose: Independently review the Guardian worktree boundary, ignore-commit gate, and completion PR transition against the approved contract.\nInputs: Implementation summary: Guardian derives validated active workspace from launcher environment and blocks write/edit direct paths outside it. It permits reads and does not reject cwd/symlink/path exploration alone. It detects direct mutating shell commands/redirections targeting lexically outside paths. `harness_git` rejects external `-C`, git-dir/work-tree/global/system/file overrides, non-list worktree commands, and `commit` unless `git check-ignore --no-index .hrn/.harness-ignore-probe` succeeds. Begin-workflow attaches the external map to workflow ID and renames its branch from the first request goal. Final verification in enabled mode first errors requesting `{title,body,draft,labels}` under project AGENTS guidance; after npm test receipt is written it retries `git push --set-upstream origin <mapped branch>` plus `gh pr create --base main --head ...` at most 3 times. It records result/attempts in state, returns complete on terminal failure with user-facing report, and skips all PR requirements when disabled. resources/AGENTS.md instructs agents to add .hrn/ before commits and to supply metadata based on project guidance. Standalone acceptance test passed after adding actual Git worktree fixtures, direct outside write/shell/Git rejection, missing-ignore commit rejection, metadata request, a gh fixture with 2 failed then successful attempts, and a three-failure completed state/evidence path. `git diff --check` passed.\nRead-only dependencies: Approved guardian-boundaries-and-completion contract, supplied implementation/test behavior, and reported command outcomes.\nProhibited scope: Do not call tools, modify files, run commands, commit, or assess the later final regression work unit.\nVerification: Return an independent review verdict identifying correctness/security/requirement defects or accepting this work unit with residual risks.\nStop conditions: Stop after static review; distinguish known limitations of Pi-internal shell parsing from direct-path requirements.\nReturn status, evidence, files changed, verification performed, assumptions, remaining risks, and unresolved issues.",
+      "status": "rejected",
+      "createdAt": "2026-07-14T04:54:34Z",
+      "reportedAt": "2026-07-14T05:27:50Z",
+      "isError": false,
+      "parentEvidence": "The reviewer raised a valid missing protection: forced or previously staged `.hrn/**` paths and shell-invoked `git commit` could bypass the ignore gate. The unit remains active to add staged-path rejection and direct shell commit gating with tests. The proposed symlink canonicalization is intentionally not adopted because the confirmed requirement explicitly permits symlink traversal and rejects only explicit direct outside-worktree paths. Completing after three PR failures is also explicitly required and remains unchanged."
+    },
+    {
+      "id": "delegation-41",
+      "role": "reviewer",
+      "workUnitId": "guardian-boundaries-and-completion",
+      "task": "[[harness-delegation:delegation-41]]\nRole: reviewer\nPurpose: Independently re-review Guardian commit protection after adding forced-staged and shell-commit gates.\nInputs: Review delta: `commitAllowedInWorkspace` now requires both `.hrn/.harness-ignore-probe` and `.hrn/worktrees/.harness-ignore-probe` to be ignored, then runs `git diff --cached --name-only -- .hrn` and rejects any staged `.hrn/**` path. `harness_git commit` uses this shared guard. Guardian's bash tool-call guard detects direct `git commit` and applies the same guard; it additionally rejects direct shell `git -C <outside>` targeting. Acceptance tests now force-add `.hrn/leak.txt`, prove harness_git commit rejection, prove shell `git commit` rejection, unstage it, and retain missing-ignore, outside write/shell/Git, PR success/retry/failure evidence. `./tests/test-standalone-cli.sh && git diff --check` passed. Do not require symlink-realpath blocking: the user explicitly directed that symlinks, cwd changes, and path traversal themselves remain allowed and only direct explicitly outside paths be rejected. Do not reject terminal completion after 3 PR failures: the user explicitly required it.\nRead-only dependencies: Confirmed user requirements, supplied implementation/test delta, and reported passing check.\nProhibited scope: Do not call tools, modify files, run commands, commit, or evaluate the later final regression work unit.\nVerification: Return an independent review verdict focusing on whether direct commit paths and staged .hrn protection now meet the approved contract.\nStop conditions: Stop after static review; list only defects that conflict with confirmed requirements rather than rejected alternatives.\nReturn status, evidence, files changed, verification performed, assumptions, remaining risks, and unresolved issues.",
+      "status": "accepted",
+      "createdAt": "2026-07-14T05:34:37Z",
+      "reportedAt": "2026-07-14T05:37:53Z",
+      "isError": false,
+      "parentEvidence": "Independent reviewer accepted the staged-.hrn and shell-commit protection based on the supplied static delta. It confirmed the shared guard covers both commit routes and reported only a non-blocking request for nested-cwd coverage; the implementation runs its Git checks from workspace.worktreePath."
+    },
+    {
+      "id": "delegation-46",
+      "role": "reviewer",
+      "workUnitId": "regression-verification",
+      "task": "[[harness-delegation:delegation-46]]\nRole: reviewer\nPurpose: Perform final independent static review of the completed worktree/PR feature, test coverage, packaging scope, and remaining risks before the regression-verification unit completes.\nInputs: Final implementation spans .gitignore, README.md, lib/worktree-manager.js, lib/launcher.js, extensions/workflow-guardian.ts, resources/AGENTS.md, and tests/test-standalone-cli.sh; workflow CONTEXT/artifacts are governed metadata. Core behavior: default --worktree true with false bypass; safe .hrn mapping and main/hrn branch lifecycle; map-based workflow attachment; active-worktree mutation/Git guards and .hrn staged/ignore commit protection; final gh PR creation after receipt with 3 retries and terminal failure completion; agent metadata/guidance; real Git/gh fixture regression paths. Parent ran `npm ci --ignore-scripts && npm test` successfully (installer, standalone CLI, release automation), plus `git diff --check` successfully. Review supplied scope against confirmed requirements; do not modify files or run tools. Flag only concrete correctness/security/release-contract issues, and state whether final regression unit can complete.\nRead-only dependencies: Confirmed requirements, manifest v2 criteria, final change summary, current diff file list, and actual command results reported above.\nProhibited scope: Do not call tools, modify files, run commands, commit, push, publish, or alter workflow artifacts.\nVerification: Return independent final review verdict with acceptance/rejection, concrete evidence, residual risks, and any release-contract drift.\nStop conditions: Stop after static review; distinguish user-authorized PR failure completion and allowed symlink/cwd/path exploration from defects.\nReturn status, evidence, files changed, verification performed, assumptions, remaining risks, and unresolved issues.",
+      "status": "rejected",
+      "createdAt": "2026-07-14T05:44:05Z",
+      "reportedAt": "2026-07-14T05:45:02Z",
+      "isError": false,
+      "parentEvidence": "The final reviewer could not evaluate a summary-only task and produced no defect finding. Its result is rejected; provide concrete final source/diff evidence for a replacement independent review before completion."
+    },
+    {
+      "id": "delegation-49",
+      "role": "reviewer",
+      "workUnitId": "regression-verification",
+      "task": "[[harness-delegation:delegation-49]]\nRole: reviewer\nPurpose: Perform a final independent static review from supplied concrete implementation excerpts and test assertions.\nInputs: Concrete source excerpt 1 (manager): map entries require 16-hex id, exact relative `.hrn/worktrees/${id}`, hrn/ branch; map JSON validation and temp+rename; exclusive map lock; valid mapped path must be non-symlink, `git rev-parse --show-toplevel` exactly equal its path, `git branch --show-current` equal map branch, and `git rev-parse --git-common-dir` equal the project common dir. `prepareWorkspace` reuses only such mapped cwd; otherwise requires local main then `git worktree add --no-checkout -b hrn/session-<random> .hrn/worktrees/<random> main`; attachment locks, rejects a different workflow id, allocates collision-tested `hrn/<slug>-<random>`, renames branch, writes only external map. Concrete source excerpt 2 (Guardian): enabled workspace is reread/validated from map and ctx.cwd must lexically lie under it; write/edit direct external paths block. Bash blocks direct mutating external lexical paths, external `git -C`, and direct `git commit` if `commitAllowedInWorkspace` fails. That guard executes `git check-ignore --no-index -q .hrn/.harness-ignore-probe` AND `.hrn/worktrees/.harness-ignore-probe`, then `git diff --cached --name-only -- .hrn` and rejects nonempty output. harness_git blocks external -C, git-dir/work-tree/global/system/file overrides, non-list worktree commands, and invokes same guard for commit. `harness_begin_workflow` attaches current map workspace using `params.goal`. Final verification requires metadata in enabled mode, writes npm-test receipt, then retries git push origin mapped branch + `gh pr create --base main --head branch --title/body/draft/labels` 3 times; it records attempts result and completes with a user-facing failure message on exhaustion, as explicitly required. Concrete test assertions: parser default/false/equals/invalid; create/reuse/attach/malformed map/unrelated repository rejection; actual temp Git main+bare origin worktrees; external write/shell/Git blocks; missing ignore and forced staged .hrn rejected for harness_git and shell commit; missing PR metadata rejected; fake gh fails twice then success (3 attempts) and fails all 3 with completed state/evidence. npm ci --ignore-scripts && npm test and git diff --check actually passed.\nRead-only dependencies: The concrete excerpts/assertions above, confirmed requirements, and manifest acceptance criteria.\nProhibited scope: Do not call tools, modify files, run commands, commit, push, publish, or alter workflow artifacts.\nVerification: Return an independent final static review verdict with only concrete issues, or acceptance with residual risks.\nStop conditions: Stop after reviewing supplied concrete evidence; user-authorized symlink/cwd/path exploration and PR-failure completion are not defects.\nReturn status, evidence, files changed, verification performed, assumptions, remaining risks, and unresolved issues.",
+      "status": "accepted",
+      "createdAt": "2026-07-14T05:45:57Z",
+      "reportedAt": "2026-07-14T05:46:59Z",
+      "isError": false,
+      "parentEvidence": "Independent final reviewer accepted the concrete implementation/test evidence: map topology validation, direct mutation/Git and staged-.hrn commit guards, PR metadata/retry/exhaustion completion behavior, and regression coverage match the confirmed requirements. It recorded only the expected residual risk that real GitHub/network behavior is not exercised by fixtures."
+    }
+  ],
+  "workUnits": {
+    "workspace-runtime": {
+      "status": "completed",
+      "evidence": "Implemented lib/worktree-manager.js and launcher integration for --worktree default isolation, .hrn mapping, main-based random branches, first-workflow attachment/renaming, validated reuse, malformed-map replacement, and .hrn ignore/documentation. Added standalone acceptance coverage including unrelated-repository provenance rejection. Passed `node --check lib/worktree-manager.js && ./tests/test-standalone-cli.sh`; independent reviewer accepted delegation-33.",
+      "completedAt": "2026-07-14T04:29:39Z"
+    },
+    "guardian-boundaries-and-completion": {
+      "status": "completed",
+      "evidence": "Implemented Guardian worktree context/branch attachment, direct external file/Git boundaries, .hrn ignore plus staged-content commit guards for harness_git and direct shell commits, agent guidance, and receipt-before retrying origin/gh completion PR flow. Added actual worktree/gh-fixture coverage for boundary rejection, metadata request, 3-attempt success/failure outcomes, and persisted failure evidence. Passed `./tests/test-standalone-cli.sh && git diff --check`; independent reviewer accepted delegation-41.",
+      "completedAt": "2026-07-14T05:38:11Z"
+    },
+    "regression-verification": {
+      "status": "completed",
+      "evidence": "Ran `npm ci --ignore-scripts && npm test` successfully; all installer, standalone CLI (including real Git/gh fixture), and release automation acceptance tests passed. Ran `git diff --check` successfully. Independent final reviewer accepted delegation-49; no concrete defects found.",
+      "completedAt": "2026-07-14T05:47:21Z"
+    }
+  },
+  "updatedAt": "2026-07-14T05:48:00Z"
+}

@@ -41,7 +41,7 @@ EXPECTED_VERSION=$(PACKAGE_JSON="$(cat "$ROOT/package.json")" node --input-type=
 [ "$VERSION" = "$EXPECTED_VERSION" ]
 HELP=$(env -i HOME="$HOME_ROOT" PATH="$NODE_ONLY_BIN" "$BIN" --help)
 printf '%s\n' "$HELP" | grep -Fx 'Harness' >/dev/null
-printf '%s\n' "$HELP" | grep -F 'hrn [Pi options] [message...]' >/dev/null
+printf '%s\n' "$HELP" | grep -F 'hrn [--worktree true|false] [Pi options] [message...]' >/dev/null
 PI_HELP=$(env -i HOME="$HOME_ROOT" PATH="$NODE_ONLY_BIN" "$BIN" --pi-help)
 printf '%s\n' "$PI_HELP" | grep -F 'pi - AI coding assistant' >/dev/null
 
@@ -87,7 +87,8 @@ EOF
 
 ROOT="$ROOT" PACKAGE_INSTALL="$PACKAGE_INSTALL" PLAIN_WORKFLOW_ROOT="$TEST_ROOT/plain-workflow" node --input-type=module <<'EOF'
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -245,6 +246,114 @@ await call("harness_complete_work_unit", { workflowId: "uncommitted", workUnitId
 const verification = await call("harness_record_verification", { workflowId: "uncommitted", expectedRevision: state().revision });
 assert.equal("projectRevision" in verification.details.receipt, false);
 assert.equal(state().phase, "completed");
+
+const { prepareWorkspace, workspaceEnvironment } = await import(pathToFileURL(join(root, "lib", "worktree-manager.js")).href);
+const isolatedProject = join(projectRoot, "..", "isolated-project");
+const origin = join(projectRoot, "..", "isolated-origin.git");
+mkdirSync(isolatedProject, { recursive: true });
+execFileSync("git", ["init", "-q", "-b", "main"], { cwd: isolatedProject });
+execFileSync("git", ["config", "user.name", "Harness Test"], { cwd: isolatedProject });
+execFileSync("git", ["config", "user.email", "harness@example.test"], { cwd: isolatedProject });
+writeFileSync(join(isolatedProject, "package.json"), '{"scripts":{"test":"node -e \\\"\\\""}}\n');
+writeFileSync(join(isolatedProject, ".gitignore"), ".hrn/\n");
+execFileSync("git", ["add", "."], { cwd: isolatedProject });
+execFileSync("git", ["commit", "-qm", "test: establish isolated project"], { cwd: isolatedProject });
+execFileSync("git", ["init", "--bare", "-q", origin]);
+execFileSync("git", ["remote", "add", "origin", origin], { cwd: isolatedProject });
+
+const fakeBin = join(projectRoot, "..", "fake-bin");
+const ghCount = join(projectRoot, "..", "gh-count");
+const ghArgs = join(projectRoot, "..", "gh-args");
+mkdirSync(fakeBin, { recursive: true });
+writeFileSync(join(fakeBin, "gh"), "#!/bin/sh\ncount=$(cat \"$GH_COUNT_FILE\" 2>/dev/null || printf 0)\ncount=$((count + 1))\nprintf '%s' \"$count\" > \"$GH_COUNT_FILE\"\nprintf '%s\\n' \"$@\" > \"$GH_ARGS_FILE\"\nif [ \"$count\" -le \"${GH_FAILS:-0}\" ]; then exit 1; fi\nprintf '%s\\n' 'https://example.test/pr/1'\n");
+chmodSync(join(fakeBin, "gh"), 0o755);
+const originalPath = process.env.PATH;
+process.env.PATH = `${fakeBin}:${originalPath}`;
+process.env.GH_COUNT_FILE = ghCount;
+process.env.GH_ARGS_FILE = ghArgs;
+const callAt = (ctx, name, params) => tools.get(name).execute("test", params, undefined, () => {}, ctx);
+
+async function reachVerification(workspace, workflowId) {
+  Object.assign(process.env, workspaceEnvironment(workspace));
+  const workspaceContext = { ...context, cwd: workspace.worktreePath };
+  const workflowStatePath = join(workspace.worktreePath, ".engineering-harness", "workflows", workflowId, "state.json");
+  const workspaceState = () => JSON.parse(readFileSync(workflowStatePath, "utf8"));
+  await callAt(workspaceContext, "harness_begin_workflow", { workflowId, title: workflowId, goal: "Add isolated worktree behavior" });
+  await callAt(workspaceContext, "harness_update_question_backlog", { workflowId, expectedRevision: workspaceState().revision, questions: [] });
+  await callAt(workspaceContext, "harness_confirm_understanding", { workflowId, expectedRevision: workspaceState().revision });
+  const workspaceManifest = {
+    schemaVersion: 2, workflowId, version: 2, title: workflowId, goal: "Completion PR fixture",
+    acceptanceCriteria: [{ id: "criterion", description: "proof" }],
+    workUnits: [{ id: "unit", title: "unit", purpose: "exercise completion", ownedScope: ["fixture"], dependsOn: [], blockers: [], acceptanceCriteria: ["criterion"], verification: ["npm test"], stopConditions: ["failure"] }],
+    relationships: [],
+  };
+  await callAt(workspaceContext, "harness_propose_plan", { workflowId, expectedRevision: workspaceState().revision, manifest: JSON.stringify(workspaceManifest) });
+  await callAt(workspaceContext, "harness_request_approval", { workflowId, expectedRevision: workspaceState().revision });
+  await callAt(workspaceContext, "harness_start_work_unit", { workflowId, workUnitId: "unit", expectedRevision: workspaceState().revision });
+  const review = await callAt(workspaceContext, "harness_reserve_delegation", { workflowId, expectedRevision: workspaceState().revision, role: "reviewer", purpose: "review", inputs: "fixture", readOnlyDependencies: "fixture", prohibitedScope: "writes", verification: "state", stopConditions: "failure", workUnitId: "unit" });
+  events.get("tool_result")({ toolName: "subagent", input: { task: review.details.task }, isError: false }, workspaceContext);
+  await callAt(workspaceContext, "harness_record_delegation_result", { workflowId, delegationId: review.details.delegationId, expectedRevision: workspaceState().revision, evidence: "review accepted", accepted: true });
+  await callAt(workspaceContext, "harness_complete_work_unit", { workflowId, workUnitId: "unit", expectedRevision: workspaceState().revision, evidence: "review accepted" });
+  return { workspaceContext, workspaceState };
+}
+
+const firstWorkspace = prepareWorkspace(isolatedProject);
+const first = await reachVerification(firstWorkspace, "completion-success");
+const outsideWrite = events.get("tool_call")({ toolName: "write", input: { path: join(isolatedProject, "outside.txt") } }, first.workspaceContext);
+assert.match(outsideWrite.reason, /outside the active worktree/);
+const outsideShell = events.get("tool_call")({ toolName: "bash", input: { command: `touch ${join(isolatedProject, "outside.txt")}` } }, first.workspaceContext);
+assert.match(outsideShell.reason, /outside the active worktree/);
+const outsideGit = await callAt(first.workspaceContext, "harness_git", { args: ["-C", isolatedProject, "status"] });
+assert.equal(outsideGit.isError, true);
+const ignorePath = join(firstWorkspace.worktreePath, ".gitignore");
+const ignored = readFileSync(ignorePath, "utf8");
+writeFileSync(ignorePath, "");
+const rejectedCommit = await callAt(first.workspaceContext, "harness_git", { args: ["commit", "--allow-empty", "-m", "blocked"] });
+assert.equal(rejectedCommit.isError, true);
+assert.match(rejectedCommit.content[0].text, /\.hrn must be ignored/);
+writeFileSync(ignorePath, ignored);
+const stagedHrn = join(firstWorkspace.worktreePath, ".hrn", "leak.txt");
+mkdirSync(join(firstWorkspace.worktreePath, ".hrn"), { recursive: true });
+writeFileSync(stagedHrn, "must not commit");
+execFileSync("git", ["add", "-f", ".hrn/leak.txt"], { cwd: firstWorkspace.worktreePath });
+const forcedHrnCommit = await callAt(first.workspaceContext, "harness_git", { args: ["commit", "-m", "blocked staged state"] });
+assert.equal(forcedHrnCommit.isError, true);
+assert.match(forcedHrnCommit.content[0].text, /staged \.hrn content/);
+const shellCommit = events.get("tool_call")({ toolName: "bash", input: { command: "git commit -m bypass" } }, first.workspaceContext);
+assert.match(shellCommit.reason, /staged \.hrn content/);
+execFileSync("git", ["reset", "--", ".hrn/leak.txt"], { cwd: firstWorkspace.worktreePath });
+await assert.rejects(
+  () => callAt(first.workspaceContext, "harness_record_verification", { workflowId: "completion-success", expectedRevision: first.workspaceState().revision }),
+  /requires PR metadata/,
+);
+process.env.GH_FAILS = "2";
+writeFileSync(ghCount, "0");
+const success = await callAt(first.workspaceContext, "harness_record_verification", { workflowId: "completion-success", expectedRevision: first.workspaceState().revision, pullRequest: { title: "test: completion", body: "body", draft: false, labels: ["test"] } });
+assert.equal(success.details.pullRequest.result, "created");
+assert.equal(success.details.pullRequest.attempts.length, 3);
+assert.match(readFileSync(ghArgs, "utf8"), /--title/);
+assert.match(readFileSync(ghArgs, "utf8"), /--label/);
+assert.equal(first.workspaceState().phase, "completed");
+
+const failedWorkspace = prepareWorkspace(isolatedProject);
+const failed = await reachVerification(failedWorkspace, "completion-failure");
+process.env.GH_FAILS = "3";
+writeFileSync(ghCount, "0");
+const failure = await callAt(failed.workspaceContext, "harness_record_verification", { workflowId: "completion-failure", expectedRevision: failed.workspaceState().revision, pullRequest: { title: "test: failed completion", body: "body", draft: true, labels: [] } });
+assert.equal(failure.details.pullRequest.result, "failed");
+assert.equal(failure.details.pullRequest.attempts.length, 3);
+assert.match(failure.content[0].text, /PR creation failed after 3 attempts/);
+assert.equal(failed.workspaceState().phase, "completed");
+assert.equal(failed.workspaceState().evidence.pullRequest.result, "failed");
+process.env.PATH = originalPath;
+delete process.env.GH_COUNT_FILE;
+delete process.env.GH_ARGS_FILE;
+delete process.env.GH_FAILS;
+delete process.env.HARNESS_WORKTREE_ENABLED;
+delete process.env.HARNESS_WORKTREE_ROOT;
+delete process.env.HARNESS_WORKTREE_PATH;
+delete process.env.HARNESS_WORKTREE_ID;
+
 assert.deepEqual(discoverWorkflowContext(projectRoot).workflows.map((workflow) => workflow.id), ["legacy-refinement", "reopened-refinement", "uncommitted"]);
 EOF
 
@@ -252,6 +361,48 @@ NODE_PATH="$ROOT" node --input-type=module <<'EOF'
 import { isSupportedNodeVersion, nodeVersionDiagnostic } from "./lib/launcher.js";
 if (!isSupportedNodeVersion("22.19.0") || !isSupportedNodeVersion("24.0.0") || isSupportedNodeVersion("22.18.99")) throw new Error("Node version compatibility check is incorrect");
 if (!nodeVersionDiagnostic("22.18.99", "/custom/node").includes("Node.js >= 22.19.0")) throw new Error("Node version diagnostic is missing the supported range");
+EOF
+
+WORKTREE_TEST_ROOT="$TEST_ROOT/worktree-manager"
+mkdir -p "$WORKTREE_TEST_ROOT"
+(
+  cd "$WORKTREE_TEST_ROOT"
+  git init -q -b main
+  git -c user.name='Harness Test' -c user.email='harness@example.test' commit --allow-empty -qm 'test: establish main'
+)
+ROOT="$ROOT" WORKTREE_TEST_ROOT="$WORKTREE_TEST_ROOT" node --input-type=module <<'EOF'
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+const {
+  attachWorkspaceToWorkflow,
+  findMappedWorkspace,
+  parseWorktreeOption,
+  prepareWorkspace,
+  workspaceForWorkflow,
+} = await import(`${process.env.ROOT}/lib/worktree-manager.js`);
+
+assert.deepEqual(parseWorktreeOption([]), { worktree: true, args: [] });
+assert.deepEqual(parseWorktreeOption(["--worktree", "false", "prompt"]), { worktree: false, args: ["prompt"] });
+assert.deepEqual(parseWorktreeOption(["--worktree=true", "prompt"]), { worktree: true, args: ["prompt"] });
+assert.throws(() => parseWorktreeOption(["--worktree", "maybe"]), /true or false/);
+
+const first = prepareWorkspace(process.env.WORKTREE_TEST_ROOT);
+assert.match(first.branch, /^hrn\/session-/);
+assert.equal(findMappedWorkspace(first.worktreePath)?.id, first.id);
+const attached = attachWorkspaceToWorkflow(first, "first-workflow", "Add workspace isolation");
+assert.equal(attached.workflowId, "first-workflow");
+assert.match(attached.branch, /^hrn\/add-workspace-isolation-/);
+assert.equal(workspaceForWorkflow(process.env.WORKTREE_TEST_ROOT, "first-workflow")?.id, first.id);
+execFileSync("git", ["worktree", "remove", "--force", attached.worktreePath], { cwd: process.env.WORKTREE_TEST_ROOT });
+execFileSync("git", ["init", "-q", "-b", attached.branch, attached.worktreePath]);
+assert.equal(workspaceForWorkflow(process.env.WORKTREE_TEST_ROOT, "first-workflow"), undefined);
+const mapPath = join(process.env.WORKTREE_TEST_ROOT, ".hrn", "worktrees.json");
+assert.equal(JSON.parse(readFileSync(mapPath, "utf8")).worktrees[0].workflowId, "first-workflow");
+writeFileSync(mapPath, "{ malformed");
+const replacement = prepareWorkspace(process.env.WORKTREE_TEST_ROOT);
+assert.notEqual(replacement.id, first.id);
 EOF
 
 printf '%s\n' 'Standalone CLI acceptance test passed.'

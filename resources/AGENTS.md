@@ -33,6 +33,12 @@ Before execution, only read-only tools, approved guardian transitions, and the p
 
 This is a Pi-internal policy boundary, not an operating-system sandbox. Deliberate writes through another terminal, process, editor, or untrusted code remain outside this guarantee.
 
+## Worktree mode and Git
+
+`hrn` normally starts in a dedicated `.hrn` worktree. Work only in the active worktree: direct file mutations or Git targeting outside it are rejected, although reads and harmless path exploration remain available. Before your first commit, ensure the repository's `.gitignore` ignores `.hrn/`. This prevents Harness's local worktrees and workflow-to-worktree mapping from being accidentally staged or committed; Harness rejects a commit until that rule is effective.
+
+When completing a worktree-mode workflow, read the project's `AGENTS.md` and related contribution guidance, then provide Harness with the PR title, body, draft choice, and labels. Choose their actual values yourself from those project rules; Harness will push the active `hrn/*` branch to `origin` and use `gh` to create the PR. It retries push/PR creation at most three times and records/reports a terminal failure without blocking workflow completion.
+
 ## Shared state
 
 The source of truth is project state under `.engineering-harness/workflows/<workflow-id>/`. Guardian transitions, delegation, and verification do not require a Git repository, commit, `HEAD`, or clean working tree. Agents may use the `harness_git` tool autonomously when useful, but Git state is not workflow evidence. v1 workflow artifacts are legacy read-only context; create or migrate to v2 for guarded progression.

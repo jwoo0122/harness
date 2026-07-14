@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 2,
+  "workflowId": "worktree-pr-cli",
+  "version": 2,
+  "title": "Add default worktree isolation and completion PR creation to hrn",
+  "goal": "Add an hrn CLI --worktree option defaulting to true, create and track a dedicated .hrn worktree and branch for each workflow, reject edits outside the active worktree, and mechanically create a PR when all workflow work is complete as part of the complete transition.",
+  "acceptanceCriteria": [
+    {
+      "id": "cli-worktree-mode",
+      "description": "hrn accepts --worktree true|false, defaults to true, and uses a .hrn worktree only in enabled mode; false preserves the current-directory mode without worktree checks or forced PR creation."
+    },
+    {
+      "id": "isolated-workspace-lifecycle",
+      "description": "Enabled mode creates/reuses a main-based, uniquely named hrn/* branch and .hrn worktree through a validated external mapping, updates the branch from the first workflow request, and safely creates anew for absent, stale, or malformed mappings."
+    },
+    {
+      "id": "write-and-commit-boundary",
+      "description": "Harness knows the active worktree, rejects direct outside-worktree file mutations and external-worktree Git targeting, and rejects commits while .hrn is not ignored; agent guidance instructs the agent to add the ignore rule before committing."
+    },
+    {
+      "id": "completion-pr-contract",
+      "description": "After all current workflow units and verification succeed, enabled mode obtains PR metadata from the agent, pushes the mapped branch to origin, creates a main-targeting gh PR with the supplied metadata, retries failures at most three times, preserves evidence, reports terminal failure, and still completes; disabled mode skips this contract."
+    },
+    {
+      "id": "regression-evidence",
+      "description": "Focused automated coverage exercises CLI parsing, map lifecycle, isolation/commit guards, and successful and exhausted completion-PR paths; the maintained repository test suite passes."
+    }
+  ],
+  "workUnits": [
+    {
+      "id": "workspace-runtime",
+      "title": "Implement CLI worktree mode and mapped workspace lifecycle",
+      "purpose": "Create the reusable runtime component that owns enabled/disabled mode parsing, .hrn workspace mapping, safe reuse/recreation, main-based random branches, and post-intake branch naming without placing workspace data in workflow artifacts.",
+      "ownedScope": [
+        "lib/launcher.js",
+        "lib/worktree-manager.js",
+        ".gitignore",
+        "README.md"
+      ],
+      "dependsOn": [],
+      "blockers": [],
+      "acceptanceCriteria": [
+        "cli-worktree-mode",
+        "isolated-workspace-lifecycle"
+      ],
+      "verification": [
+        "Add focused automated assertions for boolean option parsing, disabled-mode bypass, initial creation from main, valid mapping reuse, and stale/malformed mapping replacement.",
+        "Inspect that workspace path and branch are stored only in the .hrn mapping rather than .engineering-harness workflow artifacts."
+      ],
+      "stopConditions": [
+        "Stop and reopen refinement if Git cannot provide a local main base or if a required resume-selection interface is ambiguous.",
+        "Do not alter workflow artifact schemas to persist worktree metadata."
+      ]
+    },
+    {
+      "id": "guardian-boundaries-and-completion",
+      "title": "Enforce workspace boundaries and completion PR transition",
+      "purpose": "Connect the mapped active workspace to Guardian authorization, branch attachment/renaming at workflow intake, .hrn ignore commit checks, agent guidance, and the final retrying origin/gh PR transition.",
+      "ownedScope": [
+        "extensions/workflow-guardian.ts",
+        "lib/worktree-manager.js",
+        "resources/AGENTS.md",
+        ".pi/agents"
+      ],
+      "dependsOn": [
+        "workspace-runtime"
+      ],
+      "blockers": [],
+      "acceptanceCriteria": [
+        "write-and-commit-boundary",
+        "completion-pr-contract"
+      ],
+      "verification": [
+        "Add focused automated Guardian tests for direct external file/Git rejection, current-worktree allowance, and blocked commits until .hrn is ignored.",
+        "Use controlled Git/GitHub CLI fixtures to prove PR metadata is requested and supplied metadata drives push/create retries, evidence persistence, terminal failure reporting, and completion; prove disabled mode bypasses the PR transition."
+      ],
+      "stopConditions": [
+        "Do not reject reads, symlink traversal, cwd changes, or lexical path traversal solely because they can have benign uses.",
+        "Do not make successful PR creation a permanent completion blocker after the third failed attempt."
+      ]
+    },
+    {
+      "id": "regression-verification",
+      "title": "Complete regression coverage and independent verification",
+      "purpose": "Integrate the new lifecycle coverage into the maintained shell acceptance suite and independently validate the final runtime behavior and packaging contract.",
+      "ownedScope": [
+        "tests/test-standalone-cli.sh",
+        "tests/test-install.sh",
+        "package.json"
+      ],
+      "dependsOn": [
+        "workspace-runtime",
+        "guardian-boundaries-and-completion"
+      ],
+      "blockers": [],
+      "acceptanceCriteria": [
+        "regression-evidence"
+      ],
+      "verification": [
+        "Run npm ci --ignore-scripts and npm test in the final worktree.",
+        "Independently review the final diff for unintended paths, .hrn packaging/ignore leaks, lifecycle coverage gaps, and actual PR-failure evidence handling."
+      ],
+      "stopConditions": [
+        "Stop on any failing maintained check; report the failing command and do not claim a passing receipt.",
+        "Do not modify release versions, publish configuration, or unrelated installer behavior."
+      ]
+    }
+  ],
+  "relationships": []
+}

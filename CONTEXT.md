@@ -87,3 +87,15 @@ _Avoid_: Do not interpret this as waiving approval, verification, or other non-G
 **질문 백로그 (question backlog)**:
 요구사항 정제 단계에서 에이전트가 생성·갱신하고 Harness가 에이전트에게 지속 제공하는 미해결 질문의 영속적 목록.
 _Avoid_: 사용자에게 노출되는 질문 목록 또는 대화 로그에서 추론하는 임시 목록으로 해석하지 않는다.
+
+**worktree mode**:
+`hrn --worktree`의 boolean 실행 모드다. 기본값은 true이며 true일 때 workflow별 `.hrn` worktree 격리·쓰기/Git 경계 검사·완료 PR 절차가 적용된다. false일 때는 현재 디렉터리를 사용하고 이 절차들을 적용하지 않는다.
+_Avoid_: `--no-worktree` 같은 별도 부정 플래그나 workflow artifact 내부의 worktree 저장으로 해석하지 않는다.
+
+**workflow worktree mapping**:
+`.hrn` 아래에 보존되는 workflow와 전용 worktree·브랜치의 외부 연결 기록이다. 재개 시 유효한 연결은 재사용하고, 없거나 stale 또는 손상된 연결은 추측해 복구하지 않고 새 worktree를 만든다.
+_Avoid_: `.engineering-harness` workflow state/manifest에 worktree 경로·브랜치 정보를 넣지 않는다.
+
+**completion PR attempt**:
+worktree mode에서 현재 workflow의 모든 work unit과 verification receipt가 완료된 뒤, Harness가 origin에 push하고 `gh` CLI로 PR 생성을 최대 3회 시도하는 완료 절차다. 3회 실패해도 실패 증거와 사용자 보고 후 complete로 전이한다.
+_Avoid_: PR 성공을 complete의 절대 차단 조건으로 보거나, 다른 workflow의 상태를 완료 조건에 포함하지 않는다.

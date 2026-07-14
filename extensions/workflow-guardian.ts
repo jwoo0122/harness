@@ -15,6 +15,7 @@ import {
   readLiveV2Workflow,
   workflowArtifactPath,
 } from "../lib/workflow-protocol.js";
+import { attachWorkspaceToWorkflow, workspaceFromEnvironment } from "../lib/worktree-manager.js";
 
 const MUTATING_TOOLS = new Set(["write", "edit", "bash", "subagent"]);
 const READ_ONLY_TOOLS = new Set(["read", "grep", "find", "ls"]);
@@ -56,6 +57,125 @@ function isArtifactPath(cwd: string, value: unknown) {
   const artifactRoot = resolve(cwd, ARTIFACT_ROOT);
   const path = resolve(cwd, value.replace(/^@/, ""));
   return path === artifactRoot || path.startsWith(`${artifactRoot}/`);
+}
+
+function isWithin(root: string, candidate: string) {
+  const resolvedRoot = resolve(root);
+  const resolvedCandidate = resolve(candidate);
+  return resolvedCandidate === resolvedRoot || resolvedCandidate.startsWith(`${resolvedRoot}/`);
+}
+
+function workspaceForContext(ctx: any) {
+  if (process.env.HARNESS_WORKTREE_ENABLED !== "true") return { enabled: false };
+  const workspace = workspaceFromEnvironment(process.env);
+  if (!workspace) throw new Error("Harness worktree metadata is missing, invalid, or stale; start a new worktree session.");
+  if (!isWithin(workspace.worktreePath, ctx.cwd)) throw new Error("Harness is not running inside its active worktree.");
+  return workspace;
+}
+
+function outsideWorkspacePath(ctx: any, workspace: any, value: unknown) {
+  return typeof value === "string" && !isWithin(workspace.worktreePath, resolve(ctx.cwd, value.replace(/^@/, "")));
+}
+
+function directlyWritesOutsideWorkspace(command: unknown, ctx: any, workspace: any) {
+  if (typeof command !== "string") return false;
+  const mutatingCommand = /(?:^|[;&|]\s*)(?:rm|mv|cp|touch|mkdir|rmdir|chmod|chown|install|truncate|dd|tee)\b/.test(command);
+  const writesRedirect = /(?:^|[^>])>{1,2}\s*(?:\/|\.\.?\/)/.test(command);
+  if (!mutatingCommand && !writesRedirect) return false;
+  const candidates = command.match(/(?:\/[^\s;&|><'"`]+|\.\.?(?:\/[^\s;&|><'"`]+)?)/g) ?? [];
+  return candidates.some((candidate) => !isWithin(workspace.worktreePath, resolve(ctx.cwd, candidate)));
+}
+
+function gitSubcommand(args: string[]) {
+  let index = 0;
+  while (index < args.length) {
+    const argument = args[index];
+    if (argument === "-C" || argument === "-c" || argument === "--config-env") {
+      index += 2;
+      continue;
+    }
+    if (argument.startsWith("-C") || argument.startsWith("-c")) {
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("-")) {
+      index += 1;
+      continue;
+    }
+    return { command: argument, index };
+  }
+  return { command: undefined, index };
+}
+
+function commitAllowedInWorkspace(workspace: any) {
+  try {
+    // Probe both the directory root and a nested worktree path so the rule
+    // covers .hrn as a directory rather than a single synthetic filename.
+    execFileSync("git", ["check-ignore", "--no-index", "-q", ".hrn/.harness-ignore-probe"], { cwd: workspace.worktreePath, stdio: "ignore" });
+    execFileSync("git", ["check-ignore", "--no-index", "-q", ".hrn/worktrees/.harness-ignore-probe"], { cwd: workspace.worktreePath, stdio: "ignore" });
+  } catch {
+    return "Refusing to commit: .hrn must be ignored first so Harness worktrees and their mapping cannot be committed. Add .hrn/ to .gitignore, then retry.";
+  }
+  const staged = execFileSync("git", ["diff", "--cached", "--name-only", "--", ".hrn"], { cwd: workspace.worktreePath, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  if (staged) return "Refusing to commit: staged .hrn content is forbidden even when force-added. Unstage it, then retry.";
+  return undefined;
+}
+
+function shellRequestsGitCommit(command: unknown) {
+  return typeof command === "string" && /(?:^|[;&|]\s*)git(?:\s+(?:-C\s+\S+|-C\S+|-c\s+\S+|--[^\s]+))*\s+commit\b/.test(command);
+}
+
+function shellTargetsGitOutsideWorkspace(command: unknown, ctx: any, workspace: any) {
+  if (typeof command !== "string") return false;
+  const targets = [...command.matchAll(/\bgit\s+-C\s*(?:\s|=)(\S+)/g)].map((match) => match[1]);
+  return targets.some((target) => !isWithin(workspace.worktreePath, resolve(ctx.cwd, target)));
+}
+
+function gitAllowedInWorkspace(args: string[], ctx: any, workspace: any) {
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === "-C") {
+      const directory = args[index + 1];
+      if (!directory || !isWithin(workspace.worktreePath, resolve(ctx.cwd, directory))) {
+        return "Git commands may not target a directory outside the active worktree.";
+      }
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("-C") && argument.length > 2 && !isWithin(workspace.worktreePath, resolve(ctx.cwd, argument.slice(2)))) {
+      return "Git commands may not target a directory outside the active worktree.";
+    }
+    if (argument === "--git-dir" || argument === "--work-tree" || argument.startsWith("--git-dir=") || argument.startsWith("--work-tree=")) {
+      return "Git commands may not override the active worktree's Git directory or working tree.";
+    }
+    if (argument === "--global" || argument === "--system" || argument === "--file" || argument.startsWith("--file=")) {
+      return "Git commands may not modify configuration outside the active worktree.";
+    }
+  }
+  const { command, index } = gitSubcommand(args);
+  if (command === "worktree" && args[index + 1] !== "list") {
+    return "Git worktree mutations are not allowed from an active Harness worktree.";
+  }
+  if (command === "commit") return commitAllowedInWorkspace(workspace);
+  return undefined;
+}
+
+function completionPullRequest(workspace: any, metadata: { title: string; body: string; draft: boolean; labels: string[] }) {
+  const attempts: Array<{ attempt: number; error?: string; output?: string }> = [];
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      execFileSync("git", ["push", "--set-upstream", "origin", workspace.branch], { cwd: workspace.worktreePath, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+      const args = ["pr", "create", "--base", "main", "--head", workspace.branch, "--title", metadata.title, "--body", metadata.body];
+      if (metadata.draft) args.push("--draft");
+      for (const label of metadata.labels) args.push("--label", label);
+      const output = execFileSync("gh", args, { cwd: workspace.worktreePath, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+      attempts.push({ attempt, output: output.trim() });
+      return { result: "created", attempts };
+    } catch (error) {
+      attempts.push({ attempt, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  return { result: "failed", attempts };
 }
 
 function renderWidgets(ctx: any, workflowId: string | undefined, frame: number) {
@@ -130,6 +250,25 @@ export default function workflowGuardian(pi: ExtensionAPI) {
       if (process.env.PI_SUB_AGENT_DEPTH) return { block: true, reason: "Only the parent lead may interact with Harness guardian transitions." };
       return;
     }
+    let workspace: any;
+    try {
+      workspace = workspaceForContext(ctx);
+    } catch (error) {
+      return { block: true, reason: error instanceof Error ? error.message : String(error) };
+    }
+    if (workspace.enabled && (event.toolName === "write" || event.toolName === "edit") && outsideWorkspacePath(ctx, workspace, event.input.path)) {
+      return { block: true, reason: "Harness refuses a direct file mutation outside the active worktree." };
+    }
+    if (workspace.enabled && event.toolName === "bash" && directlyWritesOutsideWorkspace(event.input.command, ctx, workspace)) {
+      return { block: true, reason: "Harness refuses a direct shell file mutation outside the active worktree." };
+    }
+    if (workspace.enabled && event.toolName === "bash" && shellTargetsGitOutsideWorkspace(event.input.command, ctx, workspace)) {
+      return { block: true, reason: "Git commands may not target a directory outside the active worktree." };
+    }
+    if (workspace.enabled && event.toolName === "bash" && shellRequestsGitCommit(event.input.command)) {
+      const rejection = commitAllowedInWorkspace(workspace);
+      if (rejection) return { block: true, reason: rejection };
+    }
     const workflow = selectedWorkflowId ? readLiveV2Workflow(ctx.cwd, selectedWorkflowId) : undefined;
     if (event.toolName === "write" && isArtifactPath(ctx.cwd, event.input.path)) {
       return { block: true, reason: "Workflow artifacts are writable only through Harness guardian transitions." };
@@ -180,10 +319,13 @@ export default function workflowGuardian(pi: ExtensionAPI) {
   pi.registerTool({
     name: "harness_git",
     label: "Run Git",
-    description: "Run a Git command in the current project without making Git state a workflow prerequisite.",
+    description: "Run a Git command in the current project. In worktree mode, direct other-worktree targeting is blocked and commits require .hrn to be ignored so its runtime state cannot be committed.",
     parameters: Type.Object({ args: Type.Array(Type.String(), { minItems: 1 }) }),
     async execute(_id, params, _signal, _update, ctx) {
       try {
+        const workspace = workspaceForContext(ctx);
+        const rejection = workspace.enabled ? gitAllowedInWorkspace(params.args, ctx, workspace) : undefined;
+        if (rejection) return { isError: true, content: [{ type: "text", text: rejection }], details: {} };
         const output = execFileSync("git", params.args, { cwd: ctx.cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
         return { content: [{ type: "text", text: output || "Git command completed." }], details: {} };
       } catch (error) {
@@ -214,6 +356,8 @@ export default function workflowGuardian(pi: ExtensionAPI) {
       const root = workflowArtifactPath(ctx.cwd, params.workflowId);
       const manifestPath = join(root, "manifest", "1.json");
       try { readFileSync(manifestPath); throw new Error(`Workflow ${params.workflowId} already exists.`); } catch (error) { if (!(error as NodeJS.ErrnoException).code?.includes("ENOENT")) throw error; }
+      const workspace = workspaceForContext(ctx);
+      if (workspace.enabled) attachWorkspaceToWorkflow(workspace, params.workflowId, params.goal);
       const manifest = {
         schemaVersion: 2,
         workflowId: params.workflowId,
@@ -456,13 +600,27 @@ export default function workflowGuardian(pi: ExtensionAPI) {
   pi.registerTool({
     name: "harness_record_verification",
     label: "Record Workflow Verification",
-    description: "Run the maintained test command and record a passing receipt only from its actual result.",
-    parameters: Type.Object({ workflowId: Type.String(), expectedRevision: Type.Integer() }),
+    description: "Run the maintained test command and record a passing receipt only from its actual result. In worktree mode, first provide the PR title, body, draft choice, and labels selected under the project's guidance; Harness then pushes and creates the PR as part of completion.",
+    parameters: Type.Object({
+      workflowId: Type.String(),
+      expectedRevision: Type.Integer(),
+      pullRequest: Type.Optional(Type.Object({
+        title: Type.String({ minLength: 1 }),
+        body: Type.String({ minLength: 1 }),
+        draft: Type.Boolean(),
+        labels: Type.Array(Type.String({ minLength: 1 })),
+      })),
+    }),
     async execute(_id, params, _signal, _update, ctx) {
       const workflow = stateFor(ctx.cwd, params.workflowId);
       if (workflow.state.phase !== "verification" || !Object.values(workflow.state.workUnits).every((unit: any) => unit.status === "completed")) throw new Error("All work units must be completed before workflow verification.");
       if (!workflow.state.delegations.some((entry: any) => entry.status === "accepted" && typeof entry.parentEvidence === "string" && entry.parentEvidence.trim() && ["verifier", "reviewer"].includes(entry.role) && !entry.isError)) throw new Error("Independent verification evidence is required.");
       if (workflow.state.revision !== params.expectedRevision) throw new Error("Workflow revision changed; reload before recording verification.");
+      const workspace = workspaceForContext(ctx);
+      if (workspace.enabled && workspace.workflowId !== params.workflowId) throw new Error("The active worktree is not attached to the workflow being completed.");
+      if (workspace.enabled && !params.pullRequest) {
+        throw new Error("Worktree completion requires PR metadata. Read the project's AGENTS.md and provide the PR title, body, draft choice, and labels for Harness to create the PR.");
+      }
       let testResult;
       try { testResult = execFileSync("npm", ["test"], { cwd: ctx.cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }); } catch (error) { throw new Error(`npm test failed: ${error instanceof Error ? error.message : String(error)}`); }
       const evidence = "npm test exited 0 under Harness guardian verification.";
@@ -471,10 +629,18 @@ export default function workflowGuardian(pi: ExtensionAPI) {
       const receiptPath = join(workflow.root, "receipts", `${receipt.id}.json`);
       mkdirSync(dirname(receiptPath), { recursive: true });
       writeFileSync(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, { mode: 0o600 });
-      writeState(workflow, params.expectedRevision, (state) => { state.phase = "completed"; state.evidence.verification = { receipt: relative(ctx.cwd, receiptPath), recordedAt: now() }; });
+      const pullRequest = workspace.enabled ? completionPullRequest(workspace, params.pullRequest!) : { result: "skipped", attempts: [] };
+      writeState(workflow, params.expectedRevision, (state) => {
+        state.phase = "completed";
+        state.evidence.verification = { receipt: relative(ctx.cwd, receiptPath), recordedAt: now() };
+        state.evidence.pullRequest = { ...pullRequest, recordedAt: now() };
+      });
       selectedWorkflowId = params.workflowId;
       refresh(ctx);
-      return { content: [{ type: "text", text: `Recorded passing receipt ${relative(ctx.cwd, receiptPath)}. The workflow is complete.` }], details: { receipt } };
+      const message = pullRequest.result === "failed"
+        ? `Recorded passing receipt ${relative(ctx.cwd, receiptPath)}. PR creation failed after 3 attempts; the workflow is complete and the failure evidence was preserved.`
+        : `Recorded passing receipt ${relative(ctx.cwd, receiptPath)}. The workflow is complete.`;
+      return { content: [{ type: "text", text: message }], details: { receipt, pullRequest } };
     },
   });
 

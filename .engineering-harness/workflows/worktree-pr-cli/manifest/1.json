@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 2,
+  "workflowId": "worktree-pr-cli",
+  "version": 1,
+  "title": "Add default worktree isolation and completion PR creation to hrn",
+  "goal": "Add an hrn CLI --worktree option defaulting to true, create and track a dedicated .hrn worktree and branch for each workflow, reject edits outside the active worktree, and mechanically create a PR when all workflow work is complete as part of the complete transition.",
+  "acceptanceCriteria": [
+    {
+      "id": "requirements-understood",
+      "description": "The user confirmed the shared understanding."
+    }
+  ],
+  "workUnits": [
+    {
+      "id": "plan-work",
+      "title": "Create an approved plan",
+      "purpose": "Convert the clarified requirement into an executable plan.",
+      "ownedScope": [],
+      "dependsOn": [],
+      "blockers": [],
+      "acceptanceCriteria": [
+        "requirements-understood"
+      ],
+      "verification": [
+        "Validate the plan structurally."
+      ],
+      "stopConditions": [
+        "Stop when a material ambiguity remains."
+      ]
+    }
+  ],
+  "relationships": []
+}

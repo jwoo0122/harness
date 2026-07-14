@@ -1,3 +1,4 @@
 node_modules/
+.hrn/
 *.tgz
 .DS_Store

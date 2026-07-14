@@ -34,11 +34,16 @@ The underlying Pi command-line flags remain available. For example:
 hrn "Inspect this repository and define acceptance criteria."
 hrn --model anthropic/claude-sonnet-4-5
 hrn --pi-help
+
+# Disable the default isolated Git worktree for this session:
+hrn --worktree false
 ```
 
 ## What the CLI owns
 
 The command launches the bundled `@earendil-works/pi-coding-agent@0.80.6` directly, with a trusted Harness guardian extension, runtime guidance (`resources/AGENTS.md`), and `pi-sub-agent` extension. Its subagents re-execute the same wrapper, so they use the bundled runtime rather than searching `PATH` for a global `pi` executable.
+
+By default, `hrn` runs workflow work in a dedicated Git worktree below `.hrn/`, on a uniquely named `hrn/*` branch based on local `main`. Harness stores the workflow-to-worktree mapping in `.hrn/worktrees.json`, which is ignored rather than placed in workflow artifacts. Start from that worktree to resume its session. Use `--worktree false` only when intentionally working in the current directory; that mode does not enforce worktree boundaries or automatic completion PR creation.
 
 Harness state is isolated from Pi's normal state:
 
