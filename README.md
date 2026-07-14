@@ -47,17 +47,17 @@ Harness state is isolated from Pi's normal state:
 | Authentication, settings, trust decisions, and sessions | `~/.engineering-harness/agent/` |
 | Harness-owned subagent roles | `~/.engineering-harness/agent/agents/` |
 | Guardian extension and global Harness guidance | Loaded from the installed package |
-| Shared workflow manifests, run state, and verification receipts | `.engineering-harness/workflows/` in the current Git worktree |
+| Shared workflow manifests, run state, and verification receipts | `.engineering-harness/workflows/` in the current project directory |
 
 Set `ENGINEERING_HARNESS_AGENT_DIR` to use a different state directory. The launcher deliberately ignores an inherited `PI_CODING_AGENT_DIR`, so a globally installed Pi cannot accidentally supply credentials, extensions, sessions, or settings to Harness. Existing Pi credentials are not copied; use `/login` in `hrn` or provider API-key environment variables. Harness sets and enforces `quietStartup: true` in this isolated state, so the Pi startup header and its Context, Skills, and Extensions lists stay hidden even when trusted project settings set it to `false`; pass `--verbose` only when diagnosing the bundled runtime.
 
 On normal launch, the Harness installs missing bundled role definitions into its own state directory and preserves customized role files. There is no separate Harness setup command.
 
-Workflow records are committed project artifacts, not ignored runtime state. Every launch discovers the current Git worktree's valid workflow artifacts at `HEAD`, supplies their data-only summary to parent and child agents, and asks the user to select a non-terminal workflow or propose a new one. It never resumes a workflow automatically. Uncommitted workflow edits are not injected, so commit them before handoff (with the user's authorization).
+Workflow records are project artifacts, not ignored runtime state. Every launch discovers valid workflow artifacts from the current project directory, supplies their data-only summary to parent and child agents, and asks the user to select a non-terminal workflow or propose a new one. It never resumes a workflow automatically. Workflow progress is independent of Git: artifacts need not be committed, and Harness works outside a Git repository.
 
 ### Shared workflow protocol
 
-A workflow uses committed JSON artifacts under `.engineering-harness/workflows/<workflow-id>/`:
+A workflow uses JSON artifacts under `.engineering-harness/workflows/<workflow-id>/`:
 
 ```text
 manifest/<version>.json  # immutable goal, criteria, work-unit DAG, blockers, relationships
@@ -65,7 +65,7 @@ state.json               # revisioned approval and lifecycle state
 receipts/<receipt-id>.json # append-only verification evidence
 ```
 
-A manifest version is approved as a whole. Natural-language approval is accepted only for the unique manifest version the agent has just presented; material changes produce a new approval-pending version. State progresses through `draft`, `awaiting_approval`, `approved`, `in_progress`, `verification_pending`, and `completed`, with `blocked`, `failed`, and `cancelled` as exceptional states. A passing receipt for the manifest version and a resolvable ancestor Git revision is required for `completed`.
+A manifest version is approved as a whole. Natural-language approval is accepted only for the unique manifest version the agent has just presented; material changes produce a new approval-pending version. State progresses through `draft`, `awaiting_approval`, `approved`, `in_progress`, `verification_pending`, and `completed`, with `blocked`, `failed`, and `cancelled` as exceptional states. A passing receipt for the manifest version is required for `completed`.
 
 Agents use revision-based optimistic concurrency for `state.json`, and declare an unsafe merge as a blocker rather than overwriting it. Before proposing a workflow they assess existing workflows for extension, derivation, or dependency, recording a relationship on both sides. Structurally invalid workflow artifacts are silently excluded from the injected context and cannot support completion.
 
@@ -87,7 +87,7 @@ The guardian enforces this lifecycle in the interactive TUI:
 6. **Execution** permits one dependency-ready work unit and requires independent verifier or reviewer evidence before it completes.
 7. **Verification** records an evidence-backed receipt.
 
-Every delegation first creates a checkpointed, structured reservation. Roles are phase-limited: analysis roles are read-only during refinement and planning; implementers work only after approval; verifiers and reviewers provide independent evidence. v1 workflow artifacts remain visible as legacy read-only context; create or migrate to v2 before progressing them.
+Every delegation first creates a structured reservation. Roles are phase-limited: analysis roles are read-only during refinement and planning; implementers work only after approval; verifiers and reviewers provide independent evidence. The `harness_git` tool lets the parent agent control Git in the current project when useful; this intentional exception includes configured Git aliases, hooks, and helpers. Neither commits nor Git state are workflow prerequisites. v1 workflow artifacts remain visible as legacy read-only context; create or migrate to v2 before progressing them.
 
 The editor shows the current workflow phase below the input and a prioritized work list of at most five lines above it. When space is limited, remaining work is shown before completed work; completed work is dimmed and struck through, and the active work unit displays a spinner.
 
@@ -152,7 +152,7 @@ npm ci --ignore-scripts
 npm test
 ```
 
-`tests/test-install.sh` covers the legacy resource installer. `tests/test-standalone-cli.sh` packs the npm artifact, installs it into a disposable prefix, verifies the guardian and protocol resources, rejects non-interactive and caller-supplied workflow paths, and validates committed v1 and v2 workflow-context discovery. `tests/test-release-automation.sh` validates Conventional Commit release configuration and the token-gated Homebrew Formula synchronizer without external network calls.
+`tests/test-install.sh` covers the legacy resource installer. `tests/test-standalone-cli.sh` packs the npm artifact, installs it into a disposable prefix, verifies the guardian and protocol resources, rejects non-interactive and caller-supplied workflow paths, and validates v1 and v2 workflow-context discovery plus Git-independent Guardian transitions. `tests/test-release-automation.sh` validates Conventional Commit release configuration and the token-gated Homebrew Formula synchronizer without external network calls.
 
 ## Repository layout
 
@@ -168,7 +168,7 @@ npm test
 ├── .github/workflows/release.yml
 ├── scripts/sync-homebrew-formula.mjs
 ├── docs/adr/                   # durable architecture decisions
-├── .engineering-harness/       # committed workflow state in consumer projects
+├── .engineering-harness/       # workflow state in consumer projects
 ├── install.sh                  # optional legacy resource installer
 └── tests/
 ```

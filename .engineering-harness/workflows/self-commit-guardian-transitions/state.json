@@ -1,0 +1,128 @@
+{
+  "schemaVersion": 2,
+  "workflowId": "self-commit-guardian-transitions",
+  "manifestVersion": 3,
+  "revision": 31,
+  "phase": "execution",
+  "evidence": {
+    "refinement": {
+      "goal-and-users": {
+        "question": "Who needs the behavior and what is their goal?",
+        "answer": "Users running hrn should be able to complete a governed workflow without manually creating Git commits solely to unblock the tool; Guardian should evaluate workflow evidence independently of Git commit presence.",
+        "kind": "decision"
+      },
+      "scope-and-non-goals": {
+        "question": "Should hrn create commits automatically, or should commits become entirely unnecessary to Guardian and workflow operation?",
+        "answer": "Commits should become entirely unnecessary. hrn must not require or create commits merely to advance Guardian or the governed workflow; Guardian behavior and requirements must be independent of commits.",
+        "kind": "decision"
+      },
+      "domain-terms": {
+        "question": "What does commit-independent Guardian operation mean?",
+        "answer": "Git commit presence, HEAD changes, and a clean working tree are not Guardian state-transition requirements. Existing non-Git evidence requirements, including approval and verification receipts, remain in effect.",
+        "kind": "decision"
+      },
+      "primary-scenarios": {
+        "question": "What is the primary successful scenario?",
+        "answer": "With uncommitted changes, including user changes, Guardian allows the next state transition once all required non-Git evidence such as approval and verification is present; hrn neither requests nor creates a commit to unblock it.",
+        "kind": "decision"
+      },
+      "boundaries-and-failures": {
+        "question": "How should Git failures and missing non-Git evidence be handled?",
+        "answer": "Git status, commit, and repository availability must not block Guardian transitions. Missing required non-Git evidence, including approval or verification, must continue to block transitions under the existing rules.",
+        "kind": "decision"
+      },
+      "alternatives-and-tradeoffs": {
+        "question": "Should Git be removed entirely from hrn, made optional, or remain agent-controlled without gating Guardian?",
+        "answer": "Git remains available for the agent to manipulate autonomously at any time, regardless of a user's separate Git activity. However, Guardian transitions and workflow requirements must not depend on commits or other Git state; no commit is required merely to advance the workflow.",
+        "kind": "decision"
+      },
+      "acceptance-and-evidence": {
+        "question": "What automated acceptance evidence is required?",
+        "answer": "Automated tests prove: (1) Guardian transitions succeed with uncommitted changes and outside a Git repository when required approval and verification evidence exists; (2) missing non-Git evidence still blocks transitions; and (3) no hrn prompt, policy, or transition validator requires a user-created commit, while agent Git tooling is allowed without prior user delegation.",
+        "kind": "decision"
+      },
+      "rollout-and-verification": {
+        "question": "How should the change be rolled out and verified?",
+        "answer": "Apply the change immediately without migration or configuration, preserve existing approval and verification rules, and verify it with focused regression tests plus the maintained full test suite.",
+        "kind": "decision"
+      }
+    },
+    "terms": [
+      {
+        "term": "commit-independent Guardian operation",
+        "definition": "Guardian state transitions do not depend on Git commit presence, HEAD changes, or a clean working tree. Approval and verification evidence remain required.",
+        "recordedAt": "2026-07-12T16:52:08Z"
+      }
+    ],
+    "adrs": [
+      {
+        "title": "Decouple Guardian transitions from Git state",
+        "path": "docs/adr/0001-decouple-guardian-transitions-from-git-state.md",
+        "recordedAt": "2026-07-12T16:55:23Z"
+      }
+    ],
+    "sharedUnderstanding": true,
+    "approval": true,
+    "reopened": {
+      "reason": "Repository inspection found README.md publicly documents committed Git workflow artifacts and checkpointed delegations. Leaving it unchanged would contradict the requested Git-independent behavior, so the approved implementation scope must include its documentation update.",
+      "at": "2026-07-12T17:00:08Z",
+      "invalidatedManifestVersion": 2
+    },
+    "planProposed": 3
+  },
+  "delegations": [
+    {
+      "id": "delegation-20",
+      "role": "reviewer",
+      "workUnitId": "implement-git-independent-guardian",
+      "task": "[[harness-delegation:delegation-20]]\nRole: reviewer\nPurpose: Independently review the implemented Guardian Git-decoupling change for requirement coverage, regressions, and unintended weakening of approval or verification gates.\nInputs: Original user requirement; modified extensions/workflow-guardian.ts, lib/workflow-context.js, resources/AGENTS.md, README.md, and tests/test-standalone-cli.sh; passing focused test evidence.\nRead-only dependencies: Repository source, generated workflow artifacts, test results, and Git diff.\nProhibited scope: Do not edit any files, create commits, alter workflow artifacts, or expand scope.\nVerification: Inspect the diff and relevant code paths; run read-only diagnostics or the focused test only if needed; map findings to the acceptance criteria.\nStop conditions: Report BLOCKED if review requires uncommitted changes to be committed, or REDEFINITION_REQUIRED if Git independence conflicts with preserved non-Git evidence gates.\nReturn status, evidence, files changed, verification performed, assumptions, remaining risks, and unresolved issues.",
+      "status": "rejected",
+      "createdAt": "2026-07-12T17:07:06Z",
+      "reportedAt": "2026-07-12T17:13:56Z",
+      "isError": false,
+      "parentEvidence": "Reviewer found that the intentionally phase-independent harness_git capability conflicts with the shipped statement that every pre-execution mutation is blocked. The user explicitly chose autonomous Git control, so retain the capability but revise the runtime contract to state the deliberate exception and preserve all non-Git Guardian gates."
+    },
+    {
+      "id": "delegation-23",
+      "role": "reviewer",
+      "workUnitId": "implement-git-independent-guardian",
+      "task": "[[harness-delegation:delegation-23]]\nRole: reviewer\nPurpose: Re-review the implemented Git-independent Guardian behavior after the runtime contract was clarified to make parent-only autonomous harness_git access an explicit, user-approved exception to normal phase mutation controls.\nInputs: User decision requiring autonomous Git control at any time; ADR docs/adr/0001-decouple-guardian-transitions-from-git-state.md; modified Guardian, workflow context, resources, README, tests, and prior review finding.\nRead-only dependencies: Repository source, workflow artifacts, prior reviewer finding, Git diff, and test results.\nProhibited scope: Do not edit files, create commits, alter workflow artifacts, or reject the explicit autonomous-Git decision; identify only behavior inconsistent with that decision or weakened non-Git evidence gates.\nVerification: Inspect the final diff and map Git-independence, retained non-Git gates, explicit autonomous Git exception, and regression coverage to code and tests.\nStop conditions: Report PARTIAL if any Git-derived transition condition remains or any non-Git evidence gate is weakened; report BLOCKED only for a missing prerequisite.\nReturn status, evidence, files changed, verification performed, assumptions, remaining risks, and unresolved issues.",
+      "status": "rejected",
+      "createdAt": "2026-07-12T17:14:57Z",
+      "reportedAt": "2026-07-12T17:18:39Z",
+      "isError": false,
+      "parentEvidence": "Reviewer identified a security bypass: arbitrary Git aliases can execute shell code before execution. Preserve the user-approved parent-only autonomous Git capability while restricting it to built-in Git commands in the current project and adding a regression test that rejects alias/global-option injection."
+    },
+    {
+      "id": "delegation-26",
+      "role": "reviewer",
+      "workUnitId": "implement-git-independent-guardian",
+      "task": "[[harness-delegation:delegation-26]]\nRole: reviewer\nPurpose: Verify that the remediation retains Git-independent Guardian transitions and user-approved autonomous built-in Git control while rejecting Git alias-based shell execution and preserving non-Git evidence gates.\nInputs: Commit 1918103; modified extensions/workflow-guardian.ts, tests/test-standalone-cli.sh, resources/AGENTS.md, README.md, CONTEXT.md; prior security review findings.\nRead-only dependencies: Repository source, current workflow artifacts, prior reviewer reports, Git diff, and test output.\nProhibited scope: Do not edit files, create commits, alter workflow artifacts, or require Git commits as a workflow prerequisite.\nVerification: Inspect the Git command validation, the alias-injection regression, direct filesystem workflow discovery, and retained approval/review/verification checks. Report only evidence-backed findings.\nStop conditions: Report PARTIAL for any remaining alias/shell bypass, Git-derived transition condition, or weakened non-Git evidence gate; report BLOCKED only for missing prerequisites.\nReturn status, evidence, files changed, verification performed, assumptions, remaining risks, and unresolved issues.",
+      "status": "rejected",
+      "createdAt": "2026-07-12T17:20:48Z",
+      "reportedAt": "2026-07-12T17:26:17Z",
+      "isError": false,
+      "parentEvidence": "The reviewer correctly identified Git-mediated subprocess paths. The user explicitly confirmed that parent-agent autonomous Git control in trusted projects is an intentional exception to ordinary shell restrictions, so the built-in-only remediation is no longer aligned with the approved requirement. Restore unrestricted current-project Git invocation and document the exception clearly."
+    },
+    {
+      "id": "delegation-29",
+      "role": "reviewer",
+      "workUnitId": "implement-git-independent-guardian",
+      "task": "[[harness-delegation:delegation-29]]\nRole: reviewer\nPurpose: Final implementation review against the explicit user decision: parent agents may autonomously control Git at any phase in trusted projects, including configured aliases, hooks, and helpers, while Guardian state transitions remain fully independent of Git and retain all non-Git evidence gates.\nInputs: User confirmation of the explicit Git-control exception; ADR; final Guardian, workflow-context, runtime guidance, README, CONTEXT, and standalone acceptance test; prior review findings and their resolution.\nRead-only dependencies: Repository source, workflow artifacts, final branch diff, and focused test output.\nProhibited scope: Do not edit files, create commits, alter workflow artifacts, or treat the user-approved Git exception as a defect. Review only Git transition dependencies, non-Git evidence gates, test coverage, and documentation consistency.\nVerification: Inspect source and tests to verify no commit/HEAD/repository/clean-tree requirement remains; verify approval, reviewer/verifier, work-unit, and npm-test receipt gates remain; verify documentation clearly states the explicit Git exception.\nStop conditions: Report PARTIAL for an unapproved Git-derived Guardian transition gate, a weakened non-Git evidence gate, inconsistent documentation, or missing regression evidence; report BLOCKED only for missing prerequisites.\nReturn status, evidence, files changed, verification performed, assumptions, remaining risks, and unresolved issues.",
+      "status": "rejected",
+      "createdAt": "2026-07-12T17:28:18Z",
+      "reportedAt": "2026-07-12T18:23:24Z",
+      "isError": false,
+      "parentEvidence": "Reviewer execution timed out before producing evidence. The maintained npm test suite was then run by the parent and passed; no reviewer evidence is accepted from the timed-out run."
+    }
+  ],
+  "workUnits": {
+    "implement-git-independent-guardian": {
+      "status": "in_progress"
+    },
+    "independently-verify-guardian": {
+      "status": "pending"
+    }
+  },
+  "updatedAt": "2026-07-14T01:07:29Z"
+}

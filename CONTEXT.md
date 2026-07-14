@@ -9,7 +9,7 @@ The explicit, repository-owned rules and records that govern a Harness work item
 _Avoid_: implicit workflow, agent memory
 
 **Project Workflow State**:
-The version-controlled, project-local source of truth that collaborators and Harness agents jointly advance for workflow work items; it is not user-home or ignored runtime state.
+The project-local, Git-independent source of truth that collaborators and Harness agents jointly advance for workflow work items; it is not user-home or ignored runtime state.
 _Avoid_: local cache, private state
 
 **Execution Plan**:
@@ -37,11 +37,11 @@ The durable lifecycle record for an approved workflow version. Its nominal progr
 _Avoid_: session status, inferred progress
 
 **Verification Receipt**:
-An immutable evidence record tied to one manifest version and project revision. A passing receipt maps each acceptance criterion to observed results and is required before that workflow version can be completed.
+An immutable evidence record tied to one manifest version. A passing receipt maps each acceptance criterion to observed results and is required before that workflow version can be completed.
 _Avoid_: completion claim, test summary
 
 **Workflow Context Injection**:
-The automatic delivery of relevant shared workflow-state summaries and artifact references to every Harness agent started in the same Git worktree.
+The automatic delivery of relevant shared workflow-state summaries and artifact references to every Harness agent started in the same project.
 _Avoid_: setup command, manual resume command
 
 **State Revision**:
@@ -53,7 +53,7 @@ A user’s unstructured affirmative response to the one workflow manifest versio
 _Avoid_: approval syntax, inferred blanket consent
 
 **Workflow Artifact Set**:
-The committed project-local records for one workflow: immutable versioned manifests, one revisioned run-state record, and append-only verification receipts.
+The project-local records for one workflow: immutable versioned manifests, one revisioned run-state record, and append-only verification receipts.
 _Avoid_: ignored cache, session transcript
 
 **Workflow Extension**:
@@ -79,3 +79,7 @@ _Avoid_: inferred progress, session mode
 **Delegation Reservation**:
 A recorded, bounded contract that authorizes one subagent role, exact task, permitted phase, verification method, and stop conditions before the native subagent tool can run.
 _Avoid_: free-form delegation, implicit handoff
+
+**commit-independent Guardian operation**:
+Guardian state transitions do not depend on Git commit presence, HEAD changes, or a clean working tree. Approval and verification evidence remain required.
+_Avoid_: Do not interpret this as waiving approval, verification, or other non-Git evidence requirements.

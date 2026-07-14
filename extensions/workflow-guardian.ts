@@ -52,10 +52,6 @@ function writeState(workflow: ReturnType<typeof stateFor>, expectedRevision: num
   }
 }
 
-function isCheckpointed(cwd: string, path: string) {
-  try { return execFileSync("git", ["show", `HEAD:${relative(cwd, path)}`], { cwd, encoding: "utf8" }) === readFileSync(path, "utf8"); } catch { return false; }
-}
-
 function isArtifactPath(cwd: string, value: unknown) {
   if (typeof value !== "string") return false;
   const artifactRoot = resolve(cwd, ARTIFACT_ROOT);
@@ -71,7 +67,7 @@ function renderWidgets(ctx: any, workflowId: string | undefined, frame: number) 
   }
   const workflow = readLiveV2Workflow(ctx.cwd, workflowId);
   if (!workflow) {
-    ctx.ui.setWidget("harness-workflow-phase", ["Harness stage: workflow checkpoint is required"], { placement: "belowEditor" });
+    ctx.ui.setWidget("harness-workflow-phase", ["Harness stage: workflow state is unavailable"], { placement: "belowEditor" });
     ctx.ui.setWidget("harness-workflow-work", undefined, { placement: "aboveEditor" });
     return;
   }
@@ -147,7 +143,7 @@ export default function workflowGuardian(pi: ExtensionAPI) {
       if (event.toolName === "subagent" && workflow && allowedRoles(workflow.state.phase).size > 0) {
         const task = typeof event.input.task === "string" ? event.input.task : "";
         const reservation = workflow.state.delegations.find((entry: any) => entry.status === "reserved" && entry.task === task);
-        if (reservation && event.input.agent === reservation.role && isCheckpointed(ctx.cwd, workflow.statePath)) return;
+        if (reservation && event.input.agent === reservation.role) return;
       }
       if (MUTATING_TOOLS.has(event.toolName)) return { block: true, reason: "Blocked by Harness: complete the required workflow phase first." };
       return { block: true, reason: "Blocked by Harness: only read-only tools are available before execution." };
@@ -159,7 +155,7 @@ export default function workflowGuardian(pi: ExtensionAPI) {
     if (event.toolName === "subagent") {
       const task = typeof event.input.task === "string" ? event.input.task : "";
       const reservation = workflow.state.delegations.find((entry: any) => entry.status === "reserved" && task === entry.task);
-      if (!reservation || event.input.agent !== reservation.role || !isCheckpointed(ctx.cwd, workflow.statePath)) return { block: true, reason: "Create and checkpoint a matching structured Harness delegation reservation before calling subagent." };
+      if (!reservation || event.input.agent !== reservation.role) return { block: true, reason: "Create a matching structured Harness delegation reservation before calling subagent." };
     }
   });
 
@@ -183,9 +179,24 @@ export default function workflowGuardian(pi: ExtensionAPI) {
   });
 
   pi.registerTool({
+    name: "harness_git",
+    label: "Run Git",
+    description: "Run a Git command in the current project without making Git state a workflow prerequisite.",
+    parameters: Type.Object({ args: Type.Array(Type.String(), { minItems: 1 }) }),
+    async execute(_id, params, _signal, _update, ctx) {
+      try {
+        const output = execFileSync("git", params.args, { cwd: ctx.cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+        return { content: [{ type: "text", text: output || "Git command completed." }], details: {} };
+      } catch (error) {
+        return { isError: true, content: [{ type: "text", text: `Git command failed: ${error instanceof Error ? error.message : String(error)}` }], details: {} };
+      }
+    },
+  });
+
+  pi.registerTool({
     name: "harness_select_workflow",
     label: "Select Harness Workflow",
-    description: "Select an existing committed v2 workflow before governed work begins.",
+    description: "Select an existing v2 workflow before governed work begins.",
     parameters: Type.Object({ workflowId: Type.String() }),
     async execute(_id, params, _signal, _update, ctx) {
       stateFor(ctx.cwd, params.workflowId);
@@ -219,7 +230,7 @@ export default function workflowGuardian(pi: ExtensionAPI) {
       writeFileSync(join(root, "state.json"), `${JSON.stringify(initialState(params.workflowId, 1, manifest.workUnits), null, 2)}\n`, { mode: 0o600 });
       selectedWorkflowId = params.workflowId;
       refresh(ctx);
-      return { content: [{ type: "text", text: `Created ${params.workflowId}. Commit this intake checkpoint before delegating or changing phases.` }], details: { workflowId: params.workflowId } };
+      return { content: [{ type: "text", text: `Created ${params.workflowId}. Continue with requirements refinement.` }], details: { workflowId: params.workflowId } };
     },
   });
 
@@ -333,7 +344,7 @@ export default function workflowGuardian(pi: ExtensionAPI) {
       writeFileSync(workflow.statePath, `${JSON.stringify(nextState, null, 2)}\n`, { mode: 0o600 });
       selectedWorkflowId = params.workflowId;
       refresh(ctx);
-      return { content: [{ type: "text", text: `Recorded manifest v${manifest.version}. Request approval only after checkpointing it.` }], details: { manifestVersion: manifest.version } };
+      return { content: [{ type: "text", text: `Recorded manifest v${manifest.version}. Request approval when ready.` }], details: { manifestVersion: manifest.version } };
     },
   });
 
@@ -351,7 +362,7 @@ export default function workflowGuardian(pi: ExtensionAPI) {
       writeState(workflow, params.expectedRevision, (state) => { state.delegations.push({ id: delegationId, role: params.role, workUnitId: params.workUnitId, task, status: "reserved", createdAt: now() }); });
       selectedWorkflowId = params.workflowId;
       refresh(ctx);
-      return { content: [{ type: "text", text: `Delegation reserved. Commit the workflow checkpoint, then call subagent with this exact task:\n${task}` }], details: { delegationId, task } };
+      return { content: [{ type: "text", text: `Delegation reserved. Call subagent with this exact task:\n${task}` }], details: { delegationId, task } };
     },
   });
 
@@ -398,7 +409,7 @@ export default function workflowGuardian(pi: ExtensionAPI) {
       writeState(workflow, params.expectedRevision, (state) => { state.phase = "awaiting_approval"; state.evidence.approval = true; });
       selectedWorkflowId = params.workflowId;
       refresh(ctx);
-      return { content: [{ type: "text", text: "Approval recorded. Commit this approval checkpoint before beginning execution." }], details: {} };
+      return { content: [{ type: "text", text: "Approval recorded. Begin dependency-ready execution when ready." }], details: {} };
     },
   });
 
@@ -431,17 +442,16 @@ export default function workflowGuardian(pi: ExtensionAPI) {
       if (workflow.state.revision !== params.expectedRevision) throw new Error("Workflow revision changed; reload before recording verification.");
       let testResult;
       try { testResult = execFileSync("npm", ["test"], { cwd: ctx.cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }); } catch (error) { throw new Error(`npm test failed: ${error instanceof Error ? error.message : String(error)}`); }
-      const revision = execFileSync("git", ["rev-parse", "HEAD"], { cwd: ctx.cwd, encoding: "utf8" }).trim();
       const evidence = "npm test exited 0 under Harness guardian verification.";
       const criteria = workflow.manifest.acceptanceCriteria.map((criterion: any) => ({ id: criterion.id, result: "passed", evidence }));
-      const receipt = { schemaVersion: 1, id: `receipt-${Date.now()}`, workflowId: params.workflowId, manifestVersion: workflow.manifest.version, result: "passed", projectRevision: revision, verifiedBy: "harness-guardian", verifiedAt: now(), acceptanceCriteria: criteria, commands: [{ command: "npm test", exitCode: 0, result: testResult.slice(-2000) }], remainingRisks: ["Pi-internal enforcement does not prevent deliberate changes outside hrn."] };
+      const receipt = { schemaVersion: 1, id: `receipt-${Date.now()}`, workflowId: params.workflowId, manifestVersion: workflow.manifest.version, result: "passed", verifiedBy: "harness-guardian", verifiedAt: now(), acceptanceCriteria: criteria, commands: [{ command: "npm test", exitCode: 0, result: testResult.slice(-2000) }], remainingRisks: ["Pi-internal enforcement does not prevent deliberate changes outside hrn."] };
       const receiptPath = join(workflow.root, "receipts", `${receipt.id}.json`);
       mkdirSync(dirname(receiptPath), { recursive: true });
       writeFileSync(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, { mode: 0o600 });
       writeState(workflow, params.expectedRevision, (state) => { state.phase = "completed"; state.evidence.verification = { receipt: relative(ctx.cwd, receiptPath), recordedAt: now() }; });
       selectedWorkflowId = params.workflowId;
       refresh(ctx);
-      return { content: [{ type: "text", text: `Recorded passing receipt ${relative(ctx.cwd, receiptPath)}. Commit it to complete the workflow.` }], details: { receipt } };
+      return { content: [{ type: "text", text: `Recorded passing receipt ${relative(ctx.cwd, receiptPath)}. The workflow is complete.` }], details: { receipt } };
     },
   });
 

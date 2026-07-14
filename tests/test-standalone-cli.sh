@@ -85,23 +85,117 @@ assert.equal(context.workflows.find((workflow) => workflow.id === "v2").state.ph
 assert.match(buildWorkflowPrompt(context), /v2/);
 EOF
 
-PACKAGE_INSTALL="$PACKAGE_INSTALL" node --input-type=module <<'EOF'
+ROOT="$ROOT" PACKAGE_INSTALL="$PACKAGE_INSTALL" PLAIN_WORKFLOW_ROOT="$TEST_ROOT/plain-workflow" node --input-type=module <<'EOF'
+import assert from "node:assert/strict";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+
 const root = process.env.PACKAGE_INSTALL;
+const projectRoot = process.env.PLAIN_WORKFLOW_ROOT;
 const { createJiti } = await import(pathToFileURL(join(root, "node_modules", "@earendil-works", "pi-coding-agent", "node_modules", "jiti", "lib", "jiti.mjs")).href);
 const jiti = createJiti(import.meta.url);
 const extension = await jiti.import(join(root, "extensions", "workflow-guardian.ts"));
+const { discoverWorkflowContext } = await import(pathToFileURL(join(process.env.ROOT, "lib", "workflow-context.js")).href);
 if (typeof extension.default !== "function") throw new Error("guardian extension did not export a factory");
 const tools = new Map();
 const events = new Map();
 extension.default({ on: (name, handler) => events.set(name, handler), registerTool: (tool) => tools.set(tool.name, tool) });
-for (const name of ["harness_begin_workflow", "harness_refine_requirement", "harness_record_term", "harness_record_adr", "harness_propose_plan", "harness_reserve_delegation", "harness_request_approval", "harness_start_work_unit", "harness_complete_work_unit", "harness_record_verification"]) {
+for (const name of ["harness_git", "harness_select_workflow", "harness_begin_workflow", "harness_refine_requirement", "harness_record_term", "harness_record_adr", "harness_propose_plan", "harness_reserve_delegation", "harness_request_approval", "harness_start_work_unit", "harness_complete_work_unit", "harness_record_verification"]) {
   if (!tools.has(name)) throw new Error(`guardian did not register ${name}`);
 }
 for (const name of ["tool_call", "tool_result", "user_bash"]) {
   if (!events.has(name)) throw new Error(`guardian did not register ${name}`);
 }
+
+mkdirSync(projectRoot, { recursive: true });
+writeFileSync(join(projectRoot, "package.json"), '{"scripts":{"test":"node -e \\"\\""}}\n');
+const statePath = join(projectRoot, ".engineering-harness", "workflows", "uncommitted", "state.json");
+const state = () => JSON.parse(readFileSync(statePath, "utf8"));
+const context = {
+  cwd: projectRoot,
+  hasUI: true,
+  ui: { confirm: async () => true, setWidget: () => {} },
+};
+const call = (name, params) => tools.get(name).execute("test", params, undefined, () => {}, context);
+const gitRoot = join(projectRoot, "..", "git-tool");
+mkdirSync(gitRoot, { recursive: true });
+const gitResult = await tools.get("harness_git").execute("test", { args: ["init", "-q"] }, undefined, () => {}, { ...context, cwd: gitRoot });
+assert.equal(gitResult.isError, undefined);
+
+await call("harness_begin_workflow", { workflowId: "uncommitted", title: "Uncommitted workflow", goal: "Advance without Git" });
+for (const topic of ["goal-and-users", "scope-and-non-goals", "domain-terms", "primary-scenarios", "boundaries-and-failures", "alternatives-and-tradeoffs", "acceptance-and-evidence", "rollout-and-verification"]) {
+  await call("harness_refine_requirement", {
+    workflowId: "uncommitted",
+    expectedRevision: state().revision,
+    topic,
+    question: `${topic} question`,
+    answer: `${topic} answer`,
+    factOrDecision: "decision",
+  });
+}
+await call("harness_confirm_understanding", { workflowId: "uncommitted", expectedRevision: state().revision });
+const manifest = {
+  schemaVersion: 2,
+  workflowId: "uncommitted",
+  version: 2,
+  title: "Uncommitted workflow",
+  goal: "Advance without Git",
+  acceptanceCriteria: [{ id: "criterion", description: "Proof" }],
+  workUnits: [{
+    id: "unit",
+    title: "Unit",
+    purpose: "Exercise every non-Git Guardian transition",
+    ownedScope: ["fixture"],
+    dependsOn: [],
+    blockers: [],
+    acceptanceCriteria: ["criterion"],
+    verification: ["npm test"],
+    stopConditions: ["test failure"],
+  }],
+  relationships: [],
+};
+await call("harness_propose_plan", { workflowId: "uncommitted", expectedRevision: state().revision, manifest: JSON.stringify(manifest) });
+await assert.rejects(
+  () => call("harness_start_work_unit", { workflowId: "uncommitted", workUnitId: "unit", expectedRevision: state().revision }),
+  /Execution has not been approved/,
+);
+await call("harness_request_approval", { workflowId: "uncommitted", expectedRevision: state().revision });
+await call("harness_start_work_unit", { workflowId: "uncommitted", workUnitId: "unit", expectedRevision: state().revision });
+await assert.rejects(
+  () => call("harness_record_verification", { workflowId: "uncommitted", expectedRevision: state().revision }),
+  /All work units must be completed/,
+);
+const reservation = await call("harness_reserve_delegation", {
+  workflowId: "uncommitted",
+  expectedRevision: state().revision,
+  role: "reviewer",
+  purpose: "Independently review the fixture",
+  inputs: "fixture workflow",
+  readOnlyDependencies: "workflow artifacts",
+  prohibitedScope: "all writes",
+  verification: "inspect state",
+  stopConditions: "unexpected state",
+  workUnitId: "unit",
+});
+assert.equal(events.get("tool_call")({ toolName: "subagent", input: { agent: "reviewer", task: reservation.details.task } }, context), undefined);
+await assert.rejects(
+  () => call("harness_complete_work_unit", { workflowId: "uncommitted", workUnitId: "unit", expectedRevision: state().revision, evidence: "missing review" }),
+  /independent verifier or reviewer/,
+);
+events.get("tool_result")({ toolName: "subagent", input: { task: reservation.details.task }, isError: false }, context);
+await call("harness_record_delegation_result", {
+  workflowId: "uncommitted",
+  delegationId: reservation.details.delegationId,
+  expectedRevision: state().revision,
+  evidence: "Independent review accepted.",
+  accepted: true,
+});
+await call("harness_complete_work_unit", { workflowId: "uncommitted", workUnitId: "unit", expectedRevision: state().revision, evidence: "Independent review accepted." });
+const verification = await call("harness_record_verification", { workflowId: "uncommitted", expectedRevision: state().revision });
+assert.equal("projectRevision" in verification.details.receipt, false);
+assert.equal(state().phase, "completed");
+assert.deepEqual(discoverWorkflowContext(projectRoot).workflows.map((workflow) => workflow.id), ["uncommitted"]);
 EOF
 
 NODE_PATH="$ROOT" node --input-type=module <<'EOF'

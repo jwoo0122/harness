@@ -1,6 +1,6 @@
 # Harness runtime contract
 
-Harness is an interactive, Pi-internal workflow runtime. It does not use workflow skills as authority. The guardian extension, committed project workflow artifacts, and the user's explicit confirmations are the only authority for progressing governed work.
+Harness is an interactive, Pi-internal workflow runtime. It does not use workflow skills as authority. The guardian extension, project workflow artifacts, and the user's explicit confirmations are the only authority for progressing governed work.
 
 ## Enforced lifecycle
 
@@ -12,13 +12,13 @@ A governed workflow proceeds only in this order:
 4. **Planning** — create a valid work contract and v2 manifest. Every work unit needs purpose, owned scope, dependencies, blockers, acceptance criteria, verification, and stop conditions.
 5. **Approval** — require an interactive confirmation of one manifest version.
 6. **Execution** — start exactly one dependency-ready work unit. Record independent verifier or reviewer evidence before completing it.
-7. **Verification** — record a receipt tied to the current committed Git revision before completion.
+7. **Verification** — record a passing receipt before completion.
 
 Do not skip a guardian transition, infer an answer, use a workflow Skill command, or directly edit `.engineering-harness/workflows/`.
 
 ## Delegation
 
-Use `harness_reserve_delegation` before `subagent`. The reservation is the bounded delegation contract and must be checkpointed before child execution. The guardian permits only:
+Use `harness_reserve_delegation` before `subagent`. The reservation is the bounded delegation contract that authorizes child execution. The guardian permits only:
 
 - `requirements-analyst`, `explorer`, and `architect` for refinement;
 - those roles plus `verifier` for planning;
@@ -29,13 +29,13 @@ A child result is evidence only after the guardian records its status. A work un
 
 ## Tool boundary
 
-Before execution, only read-only tools and approved guardian transitions are available. During execution, mutation and shell access require an active work unit. The guardian blocks direct workflow-artifact writes in Pi tools and blocks user `!` shell commands outside active execution.
+Before execution, only read-only tools, approved guardian transitions, and the parent-only `harness_git` tool are available. `harness_git` intentionally permits autonomous Git control in the current project during every phase; configured Git aliases, hooks, and helpers are part of that explicit exception. Git state is never workflow evidence. During execution, other mutation and shell access require an active work unit. The guardian blocks direct workflow-artifact writes in Pi tools and blocks user `!` shell commands outside active execution.
 
 This is a Pi-internal policy boundary, not an operating-system sandbox. Deliberate writes through another terminal, process, editor, or untrusted code remain outside this guarantee.
 
-## Shared state and checkpoints
+## Shared state
 
-The source of truth is committed project state under `.engineering-harness/workflows/<workflow-id>/`. An uncommitted state may render locally, but it cannot authorize a child agent or survive a restart. Commit checkpoints only with explicit user authorization. v1 workflow artifacts are legacy read-only context; create or migrate to v2 for guarded progression.
+The source of truth is project state under `.engineering-harness/workflows/<workflow-id>/`. Guardian transitions, delegation, and verification do not require a Git repository, commit, `HEAD`, or clean working tree. Agents may use the `harness_git` tool autonomously when useful, but Git state is not workflow evidence. v1 workflow artifacts are legacy read-only context; create or migrate to v2 for guarded progression.
 
 ## Communication and completion
 

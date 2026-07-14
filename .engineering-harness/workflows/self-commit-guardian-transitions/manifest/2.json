@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 2,
+  "workflowId": "self-commit-guardian-transitions",
+  "version": 2,
+  "title": "Decouple Guardian transitions from Git state",
+  "goal": "Allow hrn to advance Guardian workflows without user-created commits while preserving approval and verification gates and allowing optional autonomous Git control.",
+  "acceptanceCriteria": [
+    {
+      "id": "git-independent-transitions",
+      "description": "Guardian can select, approve, delegate, start, and complete eligible workflow transitions without a committed checkpoint, a Git repository, a commit, HEAD state, or a clean working tree."
+    },
+    {
+      "id": "retained-evidence-gates",
+      "description": "Shared-understanding confirmation, manifest approval, dependency ordering, work-unit review evidence, and passing verification remain required."
+    },
+    {
+      "id": "autonomous-git-policy",
+      "description": "Runtime policy and shipped guidance do not require user-created commits and do not prohibit the agent from using Git when appropriate."
+    },
+    {
+      "id": "regression-coverage",
+      "description": "Focused regressions for Git-independent Guardian behavior and the maintained npm test suite pass."
+    }
+  ],
+  "workUnits": [
+    {
+      "id": "implement-git-independent-guardian",
+      "title": "Remove Git checkpoint gates from Guardian",
+      "purpose": "Eliminate Git commit and repository requirements from Guardian state transitions, workflow discovery, and shipped runtime guidance while retaining every non-Git evidence gate.",
+      "ownedScope": [
+        "extensions/workflow-guardian.ts",
+        "lib/workflow-context.js",
+        "resources/AGENTS.md",
+        "tests/test-standalone-cli.sh"
+      ],
+      "dependsOn": [],
+      "blockers": [],
+      "acceptanceCriteria": [
+        "git-independent-transitions",
+        "retained-evidence-gates",
+        "autonomous-git-policy",
+        "regression-coverage"
+      ],
+      "verification": [
+        "Add and run focused regression coverage that exercises Guardian transitions without committed artifacts and outside a Git repository.",
+        "Run the maintained npm test suite after the focused checks."
+      ],
+      "stopConditions": [
+        "Stop if a Git requirement is needed to preserve approval, verification, dependency, or review evidence.",
+        "Stop if the change would stage, commit, discard, or otherwise alter unrelated user changes."
+      ]
+    },
+    {
+      "id": "independently-verify-guardian",
+      "title": "Independently verify Guardian evidence gates",
+      "purpose": "Adversarially review the integrated change and confirm that Git gates are removed without weakening non-Git workflow evidence requirements.",
+      "ownedScope": [],
+      "dependsOn": [
+        "implement-git-independent-guardian"
+      ],
+      "blockers": [],
+      "acceptanceCriteria": [
+        "git-independent-transitions",
+        "retained-evidence-gates",
+        "autonomous-git-policy",
+        "regression-coverage"
+      ],
+      "verification": [
+        "Inspect the final diff and execute the focused Guardian regressions plus npm test.",
+        "Map every acceptance criterion to direct test or code-path evidence."
+      ],
+      "stopConditions": [
+        "Stop and report any remaining Git-derived transition condition, any weakened non-Git evidence gate, or any failing maintained check."
+      ]
+    }
+  ],
+  "relationships": []
+}

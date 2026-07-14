@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 2,
+  "workflowId": "self-commit-guardian-transitions",
+  "version": 1,
+  "title": "Allow hrn self-commits and guardian transitions without commits",
+  "goal": "Enable hrn to create commits itself and permit Guardian state transitions regardless of whether a Git commit exists, while preserving verified workflow behavior.",
+  "acceptanceCriteria": [
+    {
+      "id": "requirements-understood",
+      "description": "The user confirmed the shared understanding."
+    }
+  ],
+  "workUnits": [
+    {
+      "id": "plan-work",
+      "title": "Create an approved plan",
+      "purpose": "Convert the clarified requirement into an executable plan.",
+      "ownedScope": [],
+      "dependsOn": [],
+      "blockers": [],
+      "acceptanceCriteria": [
+        "requirements-understood"
+      ],
+      "verification": [
+        "Validate the plan structurally."
+      ],
+      "stopConditions": [
+        "Stop when a material ambiguity remains."
+      ]
+    }
+  ],
+  "relationships": []
+}
