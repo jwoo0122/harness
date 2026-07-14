@@ -1,3 +1,10 @@
+## [2.2.2](https://github.com/jwoo0122/harness/compare/v2.2.1...v2.2.2) (2026-07-14)
+
+
+### Bug Fixes
+
+* dynamic question ([9122f2c](https://github.com/jwoo0122/harness/commit/9122f2c3209c397763759a7675f45e8606eda6d7))
+
 ## [2.2.1](https://github.com/jwoo0122/harness/compare/v2.2.0...v2.2.1) (2026-07-14)
 
 
